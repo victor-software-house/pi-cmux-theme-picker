@@ -26,12 +26,42 @@ const STATUS_KEY = "cmux-theme";
 // Cached theme names for autocomplete
 let cachedThemeNames: string[] = [];
 
-function updateStatus(ctx: ExtensionContext, themeName?: string): void {
-	if (themeName) {
-		ctx.ui.setStatus(STATUS_KEY, ctx.ui.theme.fg("accent", `theme:${themeName}`));
-	} else {
+function formatParamValue(value: number): string {
+	if (Number.isInteger(value)) return value.toFixed(0);
+	return value.toFixed(2);
+}
+
+function updateStatus(ctx: ExtensionContext, themeName?: string, params?: ThemeParams): void {
+	if (!themeName) {
 		ctx.ui.setStatus(STATUS_KEY, undefined);
+		return;
 	}
+
+	const statusParts: string[] = [`theme:${themeName}`];
+	if (params) {
+		const summaryMap: Array<{ key: keyof ThemeParams; short: string }> = [
+			{ key: "mutedWeight", short: "muted" },
+			{ key: "dimWeight", short: "dim" },
+			{ key: "borderWeight", short: "border" },
+			{ key: "bgShift", short: "bg" },
+			{ key: "selectedBgFactor", short: "selBg" },
+			{ key: "userMsgBgFactor", short: "msgBg" },
+			{ key: "toolPendingBgFactor", short: "pendBg" },
+			{ key: "toolSuccessTint", short: "okTint" },
+			{ key: "toolErrorTint", short: "errTint" },
+			{ key: "customMsgTint", short: "custTint" },
+			{ key: "linkContrastMin", short: "linkCR" },
+		];
+		const diffSummary = summaryMap
+			.filter(({ key }) => params[key] !== DEFAULT_THEME_PARAMS[key])
+			.map(({ key, short }) => `${short}:${formatParamValue(params[key] as number)}`)
+			.join(" ");
+		if (diffSummary) statusParts.push(diffSummary);
+	}
+
+	let text = statusParts.join(" · ");
+	if (text.length > 60) text = `${text.slice(0, 57)}…`;
+	ctx.ui.setStatus(STATUS_KEY, ctx.ui.theme.fg("accent", text));
 }
 
 function syncCurrentCmuxThemeToPi(ctx: SessionContext): void {
@@ -42,8 +72,9 @@ function syncCurrentCmuxThemeToPi(ctx: SessionContext): void {
 	const slug = slugifyThemeName(currentTheme);
 	const themeName = slug ? `cmux-sync-${slug}` : "cmux-sync";
 	if (ctx.ui.theme.name === themeName) return;
-	writeAndSetPiTheme(ctx, colors, currentTheme, getThemeParams());
-	updateStatus(ctx, currentTheme);
+	const params = getThemeParams();
+	writeAndSetPiTheme(ctx, colors, currentTheme, params);
+	updateStatus(ctx, currentTheme, params);
 }
 
 function parseCommandThemeName(args: string): string {
@@ -104,16 +135,17 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 				removePreviewThemeFiles();
-				writeAndSetPiTheme(ctx, colors, themeArg, getThemeParams());
+				const params = getThemeParams();
+				writeAndSetPiTheme(ctx, colors, themeArg, params);
 				runCmuxThemeSet(themeArg);
-				updateStatus(ctx, themeArg);
+				updateStatus(ctx, themeArg, params);
 				ctx.ui.notify(`Theme "${themeArg}" applied`, "info");
 				return;
 			}
 
 			const selected = await showThemePicker(pi, ctx);
 			if (selected) {
-				updateStatus(ctx, selected);
+				updateStatus(ctx, selected, getThemeParams());
 				ctx.ui.notify(`Theme "${selected}" applied`, "info");
 			}
 		},
