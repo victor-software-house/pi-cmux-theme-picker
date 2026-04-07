@@ -36,7 +36,7 @@ export async function showThemePicker(_pi: ExtensionAPI, ctx: CommandContext): P
 	}
 
 	const entryByName = new Map(entries.map((e) => [e.name, e]));
-	const originalPiTheme = ctx.ui.theme.name;
+	const originalPiTheme = ctx.ui.theme;
 	const originalCmuxTheme = getCurrentCmuxThemeName();
 
 	let filterMode: FilterMode = "all";
@@ -73,7 +73,7 @@ export async function showThemePicker(_pi: ExtensionAPI, ctx: CommandContext): P
 		if (closed) return;
 		closed = true;
 		applyPreview.cancel();
-		if (originalPiTheme) ctx.ui.setTheme(originalPiTheme);
+		ctx.ui.setTheme(originalPiTheme);
 		if (originalCmuxTheme) runCmuxThemeSet(originalCmuxTheme);
 		done(null);
 	};
