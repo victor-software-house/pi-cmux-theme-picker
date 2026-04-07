@@ -76,18 +76,24 @@ Config file structure (`~/.pi/agent/extensions/pi-cmux-theme-picker.json`):
   },
   "themeOverrides": {
     "catppuccin-mocha": {
-      "bgShift": 12,
-      "accentSource": "palette[4]"
+      "enabled": true,
+      "params": {
+        "bgShift": 12,
+        "accentSource": "palette[4]"
+      }
     },
     "nord": {
-      "mutedWeight": 0.40,
-      "linkSource": "palette[5]"
+      "enabled": true,
+      "params": {
+        "mutedWeight": 0.40,
+        "linkSource": "palette[5]"
+      }
     }
   }
 }
 ```
 
-Resolution order: `global.themeParams` merged with `themeOverrides[currentThemeSlug]` (override wins).
+Resolution order: if `themeOverrides[slug].enabled` is `true`, merge `global.themeParams` with `themeOverrides[slug].params` (override wins). If `enabled` is `false` or absent, use global only.
 
 ### Settings panel scope toggle
 
@@ -98,19 +104,21 @@ Add a scope indicator to the `/theme-settings` panel header:
 ```
 
 Toggle with a key (e.g. `Tab` or `s`):
-- **Global** — edits apply to `themeParams` (all themes)
-- **Per-theme** — edits apply to `themeOverrides[currentTheme]` (current theme only)
+- **Global** — edits apply to `themeParams` (all themes). Switching to global automatically sets `themeOverrides[currentTheme].enabled = false` so the per-theme overrides stop applying.
+- **Per-theme** — edits apply to `themeOverrides[currentTheme].params` (current theme only). Switching to per-theme automatically sets `enabled = true`. Initial per-theme values are seeded from the current resolved params (global merged with any prior overrides).
 
 When in per-theme mode:
 - Values that match the global default show normally
 - Values that override the global show with a marker (e.g. `*` prefix or accent color)
 - A "Reset to global" action clears the per-theme override for the selected setting
+- Closing the panel while in per-theme mode keeps `enabled: true` — overrides persist
 
 ## Implementation notes
 
-- `settings.ts`: add `themeOverrides: Record<string, Partial<ThemeParams>>` to `Settings`
-- `getThemeParams()`: accept optional `themeSlug` arg, merge `themeParams` with `themeOverrides[themeSlug]`
+- `settings.ts`: add `themeOverrides: Record<string, { enabled: boolean; params: Partial<ThemeParams> }>` to `Settings`
+- `getThemeParams()`: accept optional `themeSlug` arg, merge `themeParams` with `themeOverrides[themeSlug].params` only if `enabled`
 - `updateThemeParamInMemory`: accept scope (`global` | slug), write to correct location
+- Scope toggle: switching to global sets `enabled = false`, switching to per-theme sets `enabled = true`
 - `pi-theme.ts` / `generatePiTheme`: read palette role mapping from resolved params instead of hardcoded indices
 - `index.ts` settings panel: add scope toggle, swatch rendering, palette role settings
 - Backward compatible: existing configs without `themeOverrides` or `*Source` keys work unchanged
