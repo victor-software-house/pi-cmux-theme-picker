@@ -185,22 +185,17 @@ export function writeAndSetPiTheme(ctx: SessionContext, colors: CmuxColors, sour
 	const themeFile = `${themeName}.json`;
 	const themePath = join(PI_THEMES_DIR, themeFile);
 
-	// Set theme by name FIRST — this starts Pi's file watcher on the theme file.
-	// Then write to disk — the watcher detects the change, re-reads the file,
-	// updates registeredThemes, calls setGlobalTheme, and triggers a render.
-	// 100ms watcher debounce is Pi's own mechanism for live theme reloading.
-	const result = ctx.ui.setTheme(themeName);
-	if (!result.success) {
-		// File doesn't exist yet — write first, then set
-		const themeJson = generatePiTheme(colors, themeName, p);
-		writeFileSync(themePath, JSON.stringify(themeJson, null, 2));
-		cleanupOldSyncThemes([themeFile]);
-		ctx.ui.setTheme(themeName);
-		return themeName;
-	}
 	const themeJson = generatePiTheme(colors, themeName, p);
 	writeFileSync(themePath, JSON.stringify(themeJson, null, 2));
 	cleanupOldSyncThemes([themeFile]);
+
+	// Apply via instance — bypasses registeredThemes cache entirely.
+	// setTheme(name) would return a stale cached instance if this name
+	// was previously loaded. The watcher approach has a 100ms race: if the
+	// user opens the picker before it fires, originalPiTheme captures the
+	// old instance and picker cancel kills the watcher via stopThemeWatcher().
+	const instance = buildThemeInstance(colors, themeName, p, ctx);
+	ctx.ui.setTheme(instance);
 	return themeName;
 }
 
@@ -212,20 +207,6 @@ export function writePreviewFile(colors: CmuxColors, themeName: string, p: Theme
 	const json = generatePiTheme(colors, previewName, p);
 	writeFileSync(previewPath, JSON.stringify(json, null, 2));
 	return previewName;
-}
-
-/**
- * Write a sync theme file in-place and apply via setTheme — no cleanup.
- * Used by the settings panel live preview to avoid the dir-scan on every tick.
- */
-export function writeAndPreviewPiTheme(ctx: SessionContext, colors: CmuxColors, sourceThemeName: string, p: ThemeParams): void {
-	ensureThemesDir();
-	const slug = slugifyThemeName(sourceThemeName);
-	const hash = computeThemeHash(colors);
-	const themeName = slug ? `cmux-sync-${slug}` : `cmux-sync-${hash}`;
-	const themePath = join(PI_THEMES_DIR, `${themeName}.json`);
-	writeFileSync(themePath, JSON.stringify(generatePiTheme(colors, themeName, p), null, 2));
-	ctx.ui.setTheme(themeName);
 }
 
 /** Background color keys — same set as Pi's internal createTheme. */
