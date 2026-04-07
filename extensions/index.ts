@@ -156,7 +156,7 @@ export default function (pi: ExtensionAPI) {
 					{ id: "accentFallback", label: `${swatch(p.accentFallback)} Accent fallback`, currentValue: p.accentFallback, description: "Used when palette[5] is missing" },
 					{ id: "accentAltFallback", label: `${swatch(p.accentAltFallback)} Accent alt fallback`, currentValue: p.accentAltFallback, description: "Used when palette[6] is missing" },
 					{ id: "linkContrastMin", label: "Link contrast minimum", currentValue: p.linkContrastMin.toFixed(1), values: contrastRange, description: "Minimum contrast ratio for readable links (WCAG AA = 4.5)" },
-					{ id: "previewDebounceMs", label: "Preview debounce (ms)", currentValue: settings.previewDebounceMs.toFixed(0), values: numRange(10, 200, 10, 0), description: "Cooldown before theme preview applies (lower = faster, higher = smoother navigation)" },
+					{ id: "previewDebounceMs", label: "Preview debounce (ms)", currentValue: settings.previewDebounceMs.toFixed(0), values: numRange(50, 1000, 50, 0), description: "Cooldown before theme preview applies (lower = faster, higher = smoother navigation)" },
 				];
 			};
 

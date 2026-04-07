@@ -22,7 +22,7 @@ export interface Settings {
 const DEFAULTS: Settings = {
 	autoSync: false,
 	themeParams: { ...DEFAULT_THEME_PARAMS },
-	previewDebounceMs: 50,
+	previewDebounceMs: 200,
 };
 
 let current: Settings = { ...DEFAULTS, themeParams: { ...DEFAULTS.themeParams } };
