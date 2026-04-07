@@ -329,24 +329,21 @@ class ThemePreview implements Component {
 	private pageIdx = 0;
 	private pageContainer = new Container();
 	private maxHeight = 0;
+	private maxHeightDirty = true;
+	private lastRenderWidth = 0;
+	private _lastTheme: any = null;
 	_pendingExecutions: { comp: any; name: string; args: Record<string, unknown> }[] = [];
 
 	// biome-ignore lint: Theme proxy has typed keys but we use string-based lookups
 	rebuild(t: () => any): void {
 		const theme = t();
+		this._lastTheme = theme;
 		this.setBorderFn(
 			(s: string) => theme.fg("borderMuted", s),
 			(s: string) => theme.fg("accent", s),
 		);
-		if (this.pages.length === 0) {
-			this.pages = getPreviewPages();
-			// Compute fixed height from all pages so the overlay doesn't jump.
-			for (const p of this.pages) {
-				const { container } = p.build(theme);
-				const h = container.render(60).length;
-				if (h > this.maxHeight) this.maxHeight = h;
-			}
-		}
+		if (this.pages.length === 0) this.pages = getPreviewPages();
+		this.maxHeightDirty = true;
 		const page = this.pages[this.pageIdx];
 		if (!page) return;
 		const { container, executions } = page.build(theme);
@@ -365,6 +362,20 @@ class ThemePreview implements Component {
 
 	render(width: number): string[] {
 		const inner = Math.max(1, width - 2);
+
+		// Recompute max height when width changes or pages were rebuilt.
+		if (this.maxHeightDirty || this.lastRenderWidth !== inner) {
+			this.lastRenderWidth = inner;
+			this.maxHeight = 0;
+			for (const p of this.pages) {
+				// Use a throwaway build to measure — the real page is in pageContainer
+				const { container } = p.build(this._lastTheme);
+				const h = container.render(inner).length;
+				if (h > this.maxHeight) this.maxHeight = h;
+			}
+			this.maxHeightDirty = false;
+		}
+
 		const content = this.pageContainer.render(inner);
 
 		// Fixed height: pad to maxHeight so overlay doesn't jump between pages.
