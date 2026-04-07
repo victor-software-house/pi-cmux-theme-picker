@@ -14,7 +14,7 @@ import { DynamicBorder } from "@mariozechner/pi-coding-agent";
 import { Container, Key, SelectList, Text, type SelectItem, matchesKey } from "@mariozechner/pi-tui";
 import { debounce } from "perfect-debounce";
 import { getCurrentCmuxThemeName, getAvailableCmuxThemes, runCmuxThemeSet } from "./cmux.js";
-import { writeAndSetPiTheme, buildThemeInstance, removePreviewThemeFiles, slugifyThemeName } from "./pi-theme.js";
+import { writeAndSetPiTheme, buildThemeInstance, slugifyThemeName } from "./pi-theme.js";
 import { getThemeParams, getPreviewDebounceMs } from "./settings.js";
 import type { CmuxThemeEntry, FilterMode, CommandContext } from "./types.js";
 
@@ -72,7 +72,6 @@ export async function showThemePicker(_pi: ExtensionAPI, ctx: CommandContext): P
 		const entry = entryByName.get(themeName);
 		if (!entry) { ctx.ui.notify(`Theme not found: ${themeName}`, "error"); done(null); return; }
 		writeAndSetPiTheme(ctx, entry.colors, themeName, getThemeParams(slugifyThemeName(themeName)));
-		removePreviewThemeFiles();
 		runCmuxThemeSet(themeName);
 		done(themeName);
 	};
@@ -83,7 +82,6 @@ export async function showThemePicker(_pi: ExtensionAPI, ctx: CommandContext): P
 		applyPreview.cancel();
 		if (originalInstance) ctx.ui.setTheme(originalInstance);
 		if (originalCmuxTheme) runCmuxThemeSet(originalCmuxTheme);
-		removePreviewThemeFiles();
 		done(null);
 	};
 

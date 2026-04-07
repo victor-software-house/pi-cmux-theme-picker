@@ -12,7 +12,6 @@ import { getCurrentCmuxThemeName, getCmuxThemeColors, getAvailableCmuxThemes, ru
 import { ensureSemanticHue, hexToRgb, mixColors } from "./colors.js";
 import {
 	slugifyThemeName,
-	removePreviewThemeFiles,
 	writeAndSetPiTheme,
 	buildThemeInstance,
 	resolvePaletteSourceColor,
@@ -146,7 +145,6 @@ export default function (pi: ExtensionAPI) {
 					ctx.ui.notify(`Unknown cmux theme: ${themeArg}`, "error");
 					return;
 				}
-				removePreviewThemeFiles();
 				const params = getThemeParams(slugifyThemeName(themeArg));
 				writeAndSetPiTheme(ctx, colors, themeArg, params);
 				runCmuxThemeSet(themeArg);
@@ -342,7 +340,6 @@ export default function (pi: ExtensionAPI) {
 						if (cmuxColors && cmuxTheme) {
 							writeAndSetPiTheme(ctx, cmuxColors, cmuxTheme, getThemeParams(currentThemeSlug ?? undefined));
 						}
-						removePreviewThemeFiles();
 						done(undefined);
 					},
 				);

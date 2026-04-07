@@ -1,8 +1,8 @@
 /**
- * Pi theme generation, file management, and preview lifecycle.
+ * Pi theme generation and file management.
  *
- * Converts cmux palette colors into a full Pi theme JSON, handles writing
- * preview and permanent theme files, and cleans up stale artifacts.
+ * Converts cmux palette colors into a full Pi theme JSON, writes permanent
+ * theme files, and builds in-memory Theme instances for live preview.
  */
 
 import { createHash } from "node:crypto";
@@ -19,8 +19,6 @@ import {
 import type { CmuxColors, PaletteSource, SessionContext, ThemeParams } from "./types.js";
 
 export const PI_THEMES_DIR = join(homedir(), ".pi", "agent", "themes");
-export const PREVIEW_THEME_PREFIX = "cmux-preview-";
-
 export function slugifyThemeName(name: string): string {
 	return name
 		.trim()
@@ -32,18 +30,6 @@ export function slugifyThemeName(name: string): string {
 export function ensureThemesDir(): void {
 	if (!existsSync(PI_THEMES_DIR)) {
 		mkdirSync(PI_THEMES_DIR, { recursive: true });
-	}
-}
-
-export function removePreviewThemeFiles(): void {
-	try {
-		for (const file of readdirSync(PI_THEMES_DIR)) {
-			if (file.startsWith(PREVIEW_THEME_PREFIX) && file.endsWith(".json")) {
-				unlinkSync(join(PI_THEMES_DIR, file));
-			}
-		}
-	} catch {
-		// Best-effort cleanup
 	}
 }
 
@@ -210,16 +196,6 @@ export function writeAndSetPiTheme(ctx: SessionContext, colors: CmuxColors, sour
 	return themeName;
 }
 
-/** Write a preview theme file (for prewrite or fallback sync write). */
-export function writePreviewFile(colors: CmuxColors, themeName: string, p: ThemeParams): string {
-	const slug = slugifyThemeName(themeName);
-	const previewName = `${PREVIEW_THEME_PREFIX}${slug}`;
-	const previewPath = join(PI_THEMES_DIR, `${previewName}.json`);
-	const json = generatePiTheme(colors, previewName, p);
-	writeFileSync(previewPath, JSON.stringify(json, null, 2));
-	return previewName;
-}
-
 /** Background color keys — same set as Pi's internal createTheme. */
 const BG_COLOR_KEYS = new Set([
 	"selectedBg",
@@ -264,7 +240,3 @@ export function buildThemeInstance(
 	return new ThemeClass(fgColors, bgColors, "truecolor", { name: themeName });
 }
 
-/** Resolve the preview theme name for a given source theme. */
-export function previewNameFor(themeName: string): string {
-	return `${PREVIEW_THEME_PREFIX}${slugifyThemeName(themeName)}`;
-}
