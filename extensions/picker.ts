@@ -196,10 +196,11 @@ export async function showThemePicker(ctx: CommandContext): Promise<string | nul
 
 		return {
 			render: (width: number) => container.render(width),
-			invalidate: () => {
-				container.invalidate();
-				rebuild();
-			},
+			// Do NOT call rebuild() here. SelectList callbacks use t() = ctx.ui.theme
+			// (live), so a plain container.invalidate() is enough to repaint with the
+			// new theme. rebuild() replaces the SelectList instance, resetting its
+			// selectedIndex and causing the visual jump / freeze during navigation.
+			invalidate: () => container.invalidate(),
 			handleInput: (data: string) => {
 				if (matchesKey(data, Key.tab)) {
 					filterMode = nextFilterMode(filterMode);
