@@ -19,7 +19,7 @@ extensions/
   settings.ts   — disk-persisted settings (~/.pi/agent/extensions/pi-cmux-theme-picker.json)
   types.ts      — shared interfaces (CmuxColors · CmuxThemeEntry · FilterMode · SessionContext · ThemeParams)
 .changeset/                            — changeset config + pending changeset files
-lefthook.yml                           — commit-msg: commitlint · pre-push: lockfile + typecheck + changeset-gate
+lefthook.yml                           — commit-msg: commitlint · pre-push: lockfile + typecheck
 .github/workflows/ci.yml               — PR validation: commitlint, typecheck, changeset status
 .github/workflows/release.yml          — changesets action: Version Packages PR + npm publish (OIDC)
 ```
@@ -32,7 +32,7 @@ Run before every commit:
 bun run typecheck   # tsc --noEmit — only gate required
 ```
 
-Lefthook enforces commit message format on `git commit` and lockfile sync + typecheck + changeset gate on `git push`. Do not bypass.
+Lefthook enforces commit message format on `git commit` and lockfile sync + typecheck on `git push`. Do not bypass.
 
 ## Commit discipline
 
@@ -55,7 +55,7 @@ Lefthook enforces commit message format on `git commit` and lockfile sync + type
 
 ## Pre-push changeset gate
 
-Before every push, check whether a changeset is required. This is the bridge between conventional commits and changesets — enforced by the lefthook `changeset-gate` hook and reinforced here as agent guidance.
+Before every push, check whether a changeset is required. This is the bridge between conventional commits and changesets — enforced by agent discipline and CI.
 
 **Release rule (derived from conventional commit types in the push):**
 
