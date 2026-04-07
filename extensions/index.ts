@@ -327,6 +327,7 @@ export default function (pi: ExtensionAPI) {
 
 				container.addChild(headerText);
 				container.addChild(settingsList);
+				container.addChild(new Text(t().fg("dim", " \u2190\u2192 adjust \u00B7 tab scope \u00B7 d clear override \u00B7 r reset"), 1, 0));
 
 				// Mutate existing item objects so SettingsList picks up fresh labels/swatches on next render.
 				const refreshItems = (): void => {
