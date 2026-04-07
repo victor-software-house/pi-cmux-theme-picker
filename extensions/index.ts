@@ -244,6 +244,10 @@ export default function (pi: ExtensionAPI) {
 					() => {
 						applyPreview.cancel();
 						schedulePersist.flush();
+						// Write final theme with clean name — same as /theme confirm
+						if (cmuxColors && cmuxTheme) {
+							writeAndSetPiTheme(ctx, cmuxColors, cmuxTheme, getThemeParams());
+						}
 						done(undefined);
 					},
 				);
