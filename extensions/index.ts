@@ -7,14 +7,16 @@
  */
 
 import { type ExtensionAPI, type ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { Container, Key, type AutocompleteItem, type SettingItem, SettingsList, Text, matchesKey } from "@mariozechner/pi-tui";
+import { Container, Key, type AutocompleteItem, type Component, type OverlayHandle, type SettingItem, SettingsList, Text, matchesKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import { getCurrentCmuxThemeName, getCmuxThemeColors, getAvailableCmuxThemes, runCmuxThemeSet } from "./cmux.js";
-import { ensureSemanticHue, hexToRgb, mixColors } from "./colors.js";
+import { adjustBrightness, ensureSemanticHue, getLuminance, hexToRgb, mixColors } from "./colors.js";
 import {
 	slugifyThemeName,
 	writeAndSetPiTheme,
 	buildThemeInstance,
 	resolvePaletteSourceColor,
+	resolveThemeColors,
+	type ResolvedColors,
 } from "./pi-theme.js";
 import { showThemePicker } from "./picker.js";
 import {
@@ -112,6 +114,117 @@ function numRange(min: number, max: number, step: number, decimals: number): str
 		values.push(v.toFixed(decimals));
 	}
 	return values;
+}
+
+// --- Theme preview overlay ---
+
+function fgAnsi(hex: string, text: string): string {
+	const { r, g, b } = hexToRgb(hex);
+	return `\x1b[38;2;${r};${g};${b}m${text}\x1b[0m`;
+}
+function bgAnsi(hex: string, text: string): string {
+	const { r, g, b } = hexToRgb(hex);
+	return `\x1b[48;2;${r};${g};${b}m${text}\x1b[0m`;
+}
+function fgBgAnsi(fg: string, bg: string, text: string): string {
+	const f = hexToRgb(fg);
+	const b = hexToRgb(bg);
+	return `\x1b[38;2;${f.r};${f.g};${f.b};48;2;${b.r};${b.g};${b.b}m${text}\x1b[0m`;
+}
+
+/** Non-capturing overlay that simulates Pi conversation UI with current theme colors. */
+class ThemePreview implements Component {
+	private c: ResolvedColors | null = null;
+
+	update(c: ResolvedColors | null): void { this.c = c; }
+	invalidate(): void {}
+
+	render(width: number): string[] {
+		const c = this.c;
+		if (!c) return ["  No theme loaded"];
+
+		const inner = Math.max(1, width - 2);
+		const border = (ch: string) => fgAnsi(c.borderMuted, ch);
+		const hr = border("\u2500".repeat(inner));
+		const pad = (line: string) => " " + truncateToWidth(line, inner - 1);
+
+		const lines: string[] = [];
+
+		// --- User message ---
+		lines.push(pad(fgBgAnsi(c.fg, c.userMsgBg, " > Fix the auth bug in login.ts ")));
+		lines.push("");
+
+		// --- Assistant text ---
+		lines.push(pad(
+			fgAnsi(c.fg, "I'll fix the ") +
+			fgAnsi(c.accent, "authentication") +
+			fgAnsi(c.fg, " bug. Let me ") +
+			fgAnsi(c.link, "read the file") +
+			fgAnsi(c.fg, " first."),
+		));
+		lines.push("");
+
+		// --- Tool call: success ---
+		lines.push(pad(fgBgAnsi(c.fg, c.toolSuccessBg, " \u2714 Read ") + fgBgAnsi(c.muted, c.toolSuccessBg, "src/login.ts ")));
+		lines.push(pad(fgAnsi(c.muted, "  export function login(user: string) {")));
+		lines.push(pad(fgAnsi(c.success, "+   validateToken(user.token);") ));
+		lines.push(pad(fgAnsi(c.error, "-   // missing validation") ));
+		lines.push("");
+
+		// --- Tool call: pending ---
+		lines.push(pad(fgBgAnsi(c.fg, c.toolPendingBg, " \u2026 Edit ") + fgBgAnsi(c.muted, c.toolPendingBg, "src/login.ts ")));
+		lines.push("");
+
+		// --- Tool call: error ---
+		lines.push(pad(fgBgAnsi(c.fg, c.toolErrorBg, " \u2718 Bash ") + fgBgAnsi(c.muted, c.toolErrorBg, "npm test ")));
+		lines.push(pad(fgAnsi(c.error, "  Error: ") + fgAnsi(c.muted, "test suite failed")));
+		lines.push("");
+
+		// --- Markdown-style ---
+		lines.push(pad(fgAnsi(c.warning, "## Summary")));
+		lines.push(pad(
+			fgAnsi(c.accent, "\u2022 ") +
+			fgAnsi(c.fg, "Added ") +
+			fgAnsi(c.accentAlt, "token validation") +
+			fgAnsi(c.dim, " (was missing)"),
+		));
+		lines.push(pad(
+			fgAnsi(c.accent, "\u2022 ") +
+			fgAnsi(c.warning, "\u26A0 ") +
+			fgAnsi(c.fg, "Tests ") +
+			fgAnsi(c.error, "failing") +
+			fgAnsi(c.dim, " \u2014 needs fix"),
+		));
+		lines.push("");
+
+		// --- Custom message ---
+		lines.push(pad(fgBgAnsi(c.accent, c.customMsgBg, " Note ") + fgBgAnsi(c.fg, c.customMsgBg, " Review before merging ")));
+		lines.push("");
+
+		// --- Selected item ---
+		lines.push(pad(fgBgAnsi(c.fg, c.selectedBg, " \u2192 Selected item highlight ")));
+		lines.push("");
+
+		// --- Color swatches ---
+		const sw = (hex: string) => bgAnsi(hex, "  ");
+		lines.push(pad(
+			fgAnsi(c.dim, "err ") + sw(c.error) +
+			fgAnsi(c.dim, " ok ") + sw(c.success) +
+			fgAnsi(c.dim, " warn ") + sw(c.warning) +
+			fgAnsi(c.dim, " link ") + sw(c.link),
+		));
+		lines.push(pad(
+			fgAnsi(c.dim, "acc ") + sw(c.accent) +
+			fgAnsi(c.dim, " alt ") + sw(c.accentAlt) +
+			fgAnsi(c.dim, " mute ") + sw(c.muted) +
+			fgAnsi(c.dim, " dim  ") + sw(c.dim),
+		));
+
+		// Border wrap
+		const top = border("\u256D") + fgAnsi(c.accent, " Preview ") + border("\u2500".repeat(Math.max(0, inner - 10))) + border("\u256E");
+		const bot = border("\u2570") + border("\u2500".repeat(inner)) + border("\u256F");
+		return [top, ...lines.map(l => border("\u2502") + truncateToWidth(l, inner, "", true) + border("\u2502")), bot];
+	}
 }
 
 export default function (pi: ExtensionAPI) {
@@ -295,7 +408,10 @@ export default function (pi: ExtensionAPI) {
 				const t = () => ctx.ui.theme;
 				const container = new Container();
 
+				// Indirect close — allows preview overlay cleanup to be wired in later.
+				let beforeClose: (() => void) | null = null;
 				const onClose = (): void => {
+					beforeClose?.();
 					applyPreview.cancel();
 					schedulePersist.flush();
 					if (cmuxColors && cmuxTheme) {
@@ -328,7 +444,23 @@ export default function (pi: ExtensionAPI) {
 
 				container.addChild(headerText);
 				container.addChild(settingsList);
-				container.addChild(new Text(t().fg("dim", " \u2190\u2192 adjust \u00B7 tab scope \u00B7 d clear override \u00B7 r reset"), 1, 0));
+				container.addChild(new Text(t().fg("dim", " \u2190\u2192 adjust \u00B7 tab scope \u00B7 d clear override \u00B7 r reset \u00B7 p preview"), 1, 0));
+
+				// Theme preview overlay — non-capturing, anchored right.
+				const preview = new ThemePreview();
+				const updatePreview = (): void => {
+					preview.update(cmuxColors ? resolveThemeColors(cmuxColors, paramsForScope()) : null);
+				};
+				updatePreview();
+				const previewHandle = (tui as any).showOverlay(preview, {
+					nonCapturing: true,
+					anchor: "right-center",
+					width: "40%",
+					minWidth: 38,
+					margin: { right: 1, top: 1, bottom: 1 },
+				}) as OverlayHandle;
+
+				beforeClose = () => previewHandle.hide();
 
 				// Read SettingsList internal selected index (private but accessible at runtime).
 				const getSelectedIdx = (): number => (settingsList as any).selectedIndex ?? 0;
@@ -344,6 +476,7 @@ export default function (pi: ExtensionAPI) {
 						items[i].currentValue = src.currentValue;
 					}
 					headerText.setText(t().fg("accent", t().bold(` Theme Generation Settings [${scopeLabel()}]`)));
+					updatePreview();
 				};
 
 				const cycleSelected = (direction: number): void => {
@@ -394,6 +527,10 @@ export default function (pi: ExtensionAPI) {
 								applyPreview();
 								tui.requestRender();
 							}
+							return;
+						} else if (data.toLowerCase() === "p") {
+							previewHandle.setHidden(!previewHandle.isHidden());
+							tui.requestRender();
 							return;
 						} else if (data.toLowerCase() === "r") {
 							if (scope === "global") {

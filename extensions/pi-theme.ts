@@ -74,7 +74,19 @@ function cleanupOldSyncThemes(keepFiles: string[]): void {
 	}
 }
 
-export function generatePiTheme(colors: CmuxColors, themeName: string, p: ThemeParams): object {
+/** All resolved theme colors computed from cmux palette + params. */
+export interface ResolvedColors {
+	bg: string; fg: string;
+	error: string; success: string; warning: string; link: string;
+	accent: string; accentAlt: string;
+	muted: string; dim: string; borderMuted: string;
+	selectedBg: string; userMsgBg: string;
+	toolPendingBg: string; toolSuccessBg: string; toolErrorBg: string;
+	customMsgBg: string;
+}
+
+/** Compute all derived theme colors from cmux colors + params. */
+export function resolveThemeColors(colors: CmuxColors, p: ThemeParams): ResolvedColors {
 	const bg = colors.background;
 	const fg = colors.foreground;
 	const isDark = getLuminance(bg) < 0.5;
@@ -101,12 +113,25 @@ export function generatePiTheme(colors: CmuxColors, themeName: string, p: ThemeP
 	const customMsgBg = mixColors(bg, accent, p.customMsgTint);
 
 	return {
+		bg, fg, error, success, warning, link, accent, accentAlt,
+		muted, dim, borderMuted, selectedBg, userMsgBg,
+		toolPendingBg, toolSuccessBg, toolErrorBg, customMsgBg,
+	};
+}
+
+export function generatePiTheme(colors: CmuxColors, themeName: string, p: ThemeParams): object {
+	const c = resolveThemeColors(colors, p);
+
+	return {
 		$schema: "https://raw.githubusercontent.com/badlogic/pi-mono/main/packages/coding-agent/src/modes/interactive/theme/theme-schema.json",
 		name: themeName,
 		vars: {
-			bg, fg, accent, accentAlt, link, error, success, warning,
-			muted, dim, borderMuted, selectedBg, userMsgBg,
-			toolPendingBg, toolSuccessBg, toolErrorBg, customMsgBg,
+			bg: c.bg, fg: c.fg, accent: c.accent, accentAlt: c.accentAlt,
+			link: c.link, error: c.error, success: c.success, warning: c.warning,
+			muted: c.muted, dim: c.dim, borderMuted: c.borderMuted,
+			selectedBg: c.selectedBg, userMsgBg: c.userMsgBg,
+			toolPendingBg: c.toolPendingBg, toolSuccessBg: c.toolSuccessBg,
+			toolErrorBg: c.toolErrorBg, customMsgBg: c.customMsgBg,
 		},
 		colors: {
 			accent: "accent",
@@ -162,9 +187,9 @@ export function generatePiTheme(colors: CmuxColors, themeName: string, p: ThemeP
 			bashMode: "success",
 		},
 		export: {
-			pageBg: isDark ? adjustBrightness(bg, -8) : adjustBrightness(bg, 8),
-			cardBg: bg,
-			infoBg: mixColors(bg, warning, 0.88),
+			pageBg: getLuminance(c.bg) < 0.5 ? adjustBrightness(c.bg, -8) : adjustBrightness(c.bg, 8),
+			cardBg: c.bg,
+			infoBg: mixColors(c.bg, c.warning, 0.88),
 		},
 	};
 }
