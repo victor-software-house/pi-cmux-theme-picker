@@ -89,8 +89,8 @@ export function contrastRatio(a: string, b: string): number {
 	return (lighter + 0.05) / (darker + 0.05);
 }
 
-export function pickReadableLink(candidate: string, bg: string, fallback: string, fg: string): string {
-	if (contrastRatio(candidate, bg) >= 3) return candidate;
-	if (contrastRatio(fallback, bg) >= 3) return fallback;
+export function pickReadableLink(candidate: string, bg: string, fallback: string, fg: string, minContrast = 3): string {
+	if (contrastRatio(candidate, bg) >= minContrast) return candidate;
+	if (contrastRatio(fallback, bg) >= minContrast) return fallback;
 	return fg;
 }
