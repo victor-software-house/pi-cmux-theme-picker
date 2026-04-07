@@ -259,19 +259,25 @@ function getPreviewPages(): PreviewPage[] {
 		// Page 2: Read tool
 		{
 			title: "Read",
-			build: (_theme) => {
+			build: (theme) => {
 				const c = new Container();
 				const args = { path: sampleFile, limit: 7 };
 				const comp = createToolPreviewSync("read", args);
 				if (comp) c.addChild(comp);
-				c.addChild(new Text(" Syntax-highlighted file content with\n line numbers and truncation.", 1, 1));
+				c.addChild(new Markdown(
+					"**Syntax-highlighted** file content.\n" +
+					"Uses `toolSuccessBg` background, `toolTitle` for the header, " +
+					"and `toolOutput` for the content.\n\n" +
+					"Colors: `syntaxKeyword` `syntaxFunction` `syntaxString` `syntaxVariable`",
+					1, 1, getMarkdownTheme(),
+				));
 				return { container: c, executions: comp ? [{ comp, name: "read", args }] : [] };
 			},
 		},
 		// Page 3: Edit tool
 		{
 			title: "Edit",
-			build: (_theme) => {
+			build: (theme) => {
 				// Re-write file so edit can find the original text
 				writeFileSync(sampleFile, [
 					'import { verify } from "./crypto";',
@@ -289,19 +295,29 @@ function getPreviewPages(): PreviewPage[] {
 				};
 				const comp = createToolPreviewSync("edit", args);
 				if (comp) c.addChild(comp);
-				c.addChild(new Text(" Inline diff with added/removed highlighting.", 1, 1));
+				c.addChild(new Markdown(
+					"**Inline diff** with colored changes.\n" +
+					"Uses `toolSuccessBg` on success, `toolDiffAdded` for **+** lines, " +
+					"`toolDiffRemoved` for **-** lines, `toolDiffContext` for unchanged.",
+					1, 1, getMarkdownTheme(),
+				));
 				return { container: c, executions: comp ? [{ comp, name: "edit", args }] : [] };
 			},
 		},
 		// Page 4: Bash tool
 		{
 			title: "Bash",
-			build: (_theme) => {
+			build: (theme) => {
 				const c = new Container();
 				const args = { command: "echo 'Tests passed: 3/3'" };
 				const comp = createToolPreviewSync("bash", args);
 				if (comp) c.addChild(comp);
-				c.addChild(new Text(" Command execution with exit status\n and timing display.", 1, 1));
+				c.addChild(new Markdown(
+					"**Command** output with exit status.\n" +
+					"Uses `toolSuccessBg` on exit 0, `toolErrorBg` on failure.\n" +
+					"Output in `toolOutput`, timing in `muted`.",
+					1, 1, getMarkdownTheme(),
+				));
 				return { container: c, executions: comp ? [{ comp, name: "bash", args }] : [] };
 			},
 		},
