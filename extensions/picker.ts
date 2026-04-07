@@ -2,20 +2,21 @@
  * TUI inline picker — live cmux theme picker.
  *
  * Architecture:
- * - UI is a normal SelectList. Handles input, renders immediately.
- * - Preview fires a custom event — processed async, never blocks input.
+ * - handleInput only updates state (selectedTheme) and calls requestRender.
+ *   It NEVER calls setTheme, buildThemeInstance, or runCmuxThemeSet.
+ * - A debounced function (lodash.debounce, 50ms trailing) reads the latest
+ *   selectedTheme and applies the preview. Completely decoupled from input.
  * - Disk write happens only on confirm (writeAndSetPiTheme).
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { DynamicBorder } from "@mariozechner/pi-coding-agent";
 import { Container, Key, SelectList, Text, type SelectItem, matchesKey } from "@mariozechner/pi-tui";
+import debounce from "lodash.debounce";
 import { getCurrentCmuxThemeName, getAvailableCmuxThemes, runCmuxThemeSet } from "./cmux.js";
 import { writeAndSetPiTheme, buildThemeInstance } from "./pi-theme.js";
 import { getThemeParams } from "./settings.js";
 import type { CmuxThemeEntry, FilterMode, CommandContext } from "./types.js";
-
-const PREVIEW_EVENT = "cmux-theme-preview";
 
 function isPrintableInput(data: string): boolean {
 	return data.length === 1 && data >= " " && data !== "\x7f";
@@ -27,7 +28,7 @@ function nextFilterMode(mode: FilterMode): FilterMode {
 	return "all";
 }
 
-export async function showThemePicker(pi: ExtensionAPI, ctx: CommandContext): Promise<string | null> {
+export async function showThemePicker(_pi: ExtensionAPI, ctx: CommandContext): Promise<string | null> {
 	const entries = getAvailableCmuxThemes();
 	if (entries.length === 0) {
 		ctx.ui.notify("No cmux themes found", "warning");
@@ -44,26 +45,23 @@ export async function showThemePicker(pi: ExtensionAPI, ctx: CommandContext): Pr
 		? originalCmuxTheme
 		: entries[0]!.name;
 	let closed = false;
+	let lastAppliedTheme: string | null = null;
 
-	// Async preview via custom event — never blocks input processing
-	const unsubscribe = pi.events.on(PREVIEW_EVENT, (data: unknown) => {
-		const themeName = data as string;
-		if (closed) return;
-		const entry = entryByName.get(themeName);
+	// --- Decoupled preview: debounced, reads latest selectedTheme ---
+	const applyPreview = debounce(() => {
+		if (closed || selectedTheme === lastAppliedTheme) return;
+		const entry = entryByName.get(selectedTheme);
 		if (!entry) return;
-		const instance = buildThemeInstance(entry.colors, `cmux-preview-${themeName}`, getThemeParams(), ctx);
+		lastAppliedTheme = selectedTheme;
+		const instance = buildThemeInstance(entry.colors, `cmux-preview-${selectedTheme}`, getThemeParams(), ctx);
 		ctx.ui.setTheme(instance);
-		runCmuxThemeSet(themeName);
-	});
-
-	const requestPreview = (themeName: string): void => {
-		if (!closed) pi.events.emit(PREVIEW_EVENT, themeName);
-	};
+		runCmuxThemeSet(selectedTheme);
+	}, 50, { leading: true, trailing: true, maxWait: 100 });
 
 	const closeWithConfirm = (themeName: string, done: (value: string | null) => void): void => {
 		if (closed) return;
 		closed = true;
-		unsubscribe();
+		applyPreview.cancel();
 		const entry = entryByName.get(themeName);
 		if (!entry) { ctx.ui.notify(`Theme not found: ${themeName}`, "error"); done(null); return; }
 		writeAndSetPiTheme(ctx, entry.colors, themeName, getThemeParams());
@@ -74,7 +72,7 @@ export async function showThemePicker(pi: ExtensionAPI, ctx: CommandContext): Pr
 	const closeWithCancel = (done: (value: string | null) => void): void => {
 		if (closed) return;
 		closed = true;
-		unsubscribe();
+		applyPreview.cancel();
 		if (originalPiTheme) ctx.ui.setTheme(originalPiTheme);
 		if (originalCmuxTheme) runCmuxThemeSet(originalCmuxTheme);
 		done(null);
@@ -137,9 +135,10 @@ export async function showThemePicker(pi: ExtensionAPI, ctx: CommandContext): Pr
 			const selectedIndex = items.findIndex((item) => item.value === selectedTheme);
 			if (selectedIndex >= 0) selectList.setSelectedIndex(selectedIndex);
 
+			// onSelectionChange ONLY updates state — no heavy work
 			selectList.onSelectionChange = (item) => {
 				selectedTheme = item.value;
-				requestPreview(item.value);
+				applyPreview(); // debounced — won't run inline
 			};
 			selectList.onSelect = (item) => closeWithConfirm(item.value, done);
 			selectList.onCancel = () => closeWithCancel(done);
@@ -152,7 +151,7 @@ export async function showThemePicker(pi: ExtensionAPI, ctx: CommandContext): Pr
 		};
 
 		rebuild();
-		if (selectedTheme) requestPreview(selectedTheme);
+		applyPreview(); // initial preview
 
 		return {
 			render: (width: number) => container.render(width),
@@ -178,6 +177,8 @@ export async function showThemePicker(pi: ExtensionAPI, ctx: CommandContext): Pr
 					tui.requestRender();
 					return;
 				}
+				// SelectList handles arrow keys, enter, esc.
+				// onSelectionChange updates selectedTheme + schedules debounced preview.
 				selectList?.handleInput(data);
 				tui.requestRender();
 			},

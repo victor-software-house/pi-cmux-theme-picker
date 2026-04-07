@@ -19,6 +19,7 @@ import {
 import { showThemePicker } from "./picker.js";
 import { getSettings, updateSettings, updateThemeParamInMemory, persistSettings, getThemeParams, restoreSettings } from "./settings.js";
 import { DEFAULT_THEME_PARAMS, type SessionContext, type ThemeParams } from "./types.js";
+import debounce from "lodash.debounce";
 
 const STATUS_KEY = "cmux-theme";
 
@@ -126,8 +127,6 @@ export default function (pi: ExtensionAPI) {
 			const cmuxTheme = getCurrentCmuxThemeName();
 			const cmuxColors = cmuxTheme ? getCmuxThemeColors(cmuxTheme) : null;
 
-			const SETTINGS_PREVIEW_EVENT = "cmux-settings-preview";
-
 			const buildItems = (): SettingItem[] => {
 				const p = getThemeParams();
 				const settings = getSettings();
@@ -160,19 +159,15 @@ export default function (pi: ExtensionAPI) {
 				];
 			};
 
-			// Async preview via custom event
-			const unsubscribe = pi.events.on(SETTINGS_PREVIEW_EVENT, () => {
+			// Decoupled preview: debounced, reads latest in-memory params
+			const applyPreview = debounce(() => {
 				if (!cmuxColors || !cmuxTheme) return;
 				const instance = buildThemeInstance(cmuxColors, `cmux-sync-${slugifyThemeName(cmuxTheme)}`, getThemeParams(), ctx);
 				ctx.ui.setTheme(instance);
-			});
+			}, 50, { leading: true, trailing: true, maxWait: 100 });
 
 			// Persist debounced — disk write only after 500ms of inactivity
-			let persistTimer: ReturnType<typeof setTimeout> | null = null;
-			const schedulePersist = (): void => {
-				if (persistTimer) clearTimeout(persistTimer);
-				persistTimer = setTimeout(() => { persistTimer = null; persistSettings(pi); }, 500);
-			};
+			const schedulePersist = debounce(() => persistSettings(pi), 500);
 
 			const numericKeys = new Set<string>([
 				"mutedWeight", "dimWeight", "borderWeight",
@@ -192,7 +187,7 @@ export default function (pi: ExtensionAPI) {
 				}
 				if (numericKeys.has(id)) {
 					updateThemeParamInMemory(id as keyof ThemeParams, parseFloat(newValue));
-					pi.events.emit(SETTINGS_PREVIEW_EVENT, undefined);
+					applyPreview();
 					schedulePersist();
 					return;
 				}
@@ -200,7 +195,7 @@ export default function (pi: ExtensionAPI) {
 					const hex = newValue.startsWith("#") ? newValue : `#${newValue}`;
 					if (/^#[0-9a-fA-F]{6}$/.test(hex)) {
 						updateThemeParamInMemory(id as keyof ThemeParams, hex);
-						pi.events.emit(SETTINGS_PREVIEW_EVENT, undefined);
+						applyPreview();
 						schedulePersist();
 					}
 				}
@@ -243,8 +238,8 @@ export default function (pi: ExtensionAPI) {
 						tui.requestRender();
 					},
 					() => {
-						unsubscribe();
-						if (persistTimer) { clearTimeout(persistTimer); persistSettings(pi); }
+						applyPreview.cancel();
+						schedulePersist.flush();
 						done(undefined);
 					},
 				);
