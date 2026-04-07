@@ -16,7 +16,7 @@ import {
 	ensureSemanticHue,
 	pickReadableLink,
 } from "./colors.js";
-import type { CmuxColors, SessionContext, ThemeParams } from "./types.js";
+import type { CmuxColors, PaletteSource, SessionContext, ThemeParams } from "./types.js";
 
 export const PI_THEMES_DIR = join(homedir(), ".pi", "agent", "themes");
 export const PREVIEW_THEME_PREFIX = "cmux-preview-";
@@ -56,6 +56,16 @@ function computeThemeHash(colors: CmuxColors): string {
 	return createHash("sha1").update(signature).digest("hex").slice(0, 8);
 }
 
+export function resolvePaletteSourceColor(colors: CmuxColors, source: PaletteSource): string | undefined {
+	if (source === "fg") return colors.foreground;
+	if (source === "bg") return colors.background;
+	const match = source.match(/^palette\[(\d{1,2})\]$/);
+	if (!match) return undefined;
+	const index = Number.parseInt(match[1]!, 10);
+	if (index < 0 || index > 15) return undefined;
+	return colors.palette[index];
+}
+
 function cleanupOldSyncThemes(keepFiles: string[]): void {
 	const keep = new Set(keepFiles);
 	try {
@@ -83,14 +93,14 @@ export function generatePiTheme(colors: CmuxColors, themeName: string, p: ThemeP
 	const fg = colors.foreground;
 	const isDark = getLuminance(bg) < 0.5;
 
-	const error = ensureSemanticHue(colors.palette[1], 0, p.errorFallback);
-	const success = ensureSemanticHue(colors.palette[2], 120, p.successFallback);
-	const warning = ensureSemanticHue(colors.palette[3], 50, p.warningFallback);
-	const rawLink = ensureSemanticHue(colors.palette[4], 220, p.linkFallback);
+	const error = ensureSemanticHue(resolvePaletteSourceColor(colors, p.errorSource), 0, p.errorFallback);
+	const success = ensureSemanticHue(resolvePaletteSourceColor(colors, p.successSource), 120, p.successFallback);
+	const warning = ensureSemanticHue(resolvePaletteSourceColor(colors, p.warningSource), 50, p.warningFallback);
+	const rawLink = ensureSemanticHue(resolvePaletteSourceColor(colors, p.linkSource), 220, p.linkFallback);
 	const link = pickReadableLink(rawLink, bg, p.linkFallback, fg, p.linkContrastMin);
 
-	const accent = colors.palette[5] || p.accentFallback;
-	const accentAlt = colors.palette[6] || p.accentAltFallback;
+	const accent = resolvePaletteSourceColor(colors, p.accentSource) || p.accentFallback;
+	const accentAlt = resolvePaletteSourceColor(colors, p.accentAltSource) || p.accentAltFallback;
 
 	const muted = mixColors(fg, bg, p.mutedWeight);
 	const dim = mixColors(fg, bg, p.dimWeight);

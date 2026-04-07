@@ -9,12 +9,13 @@
 import { getSettingsListTheme, type ExtensionAPI, type ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Container, Key, type AutocompleteItem, type SettingItem, SettingsList, Text, matchesKey } from "@mariozechner/pi-tui";
 import { getCurrentCmuxThemeName, getCmuxThemeColors, getAvailableCmuxThemes, runCmuxThemeSet } from "./cmux.js";
-import { hexToRgb } from "./colors.js";
+import { ensureSemanticHue, hexToRgb, mixColors } from "./colors.js";
 import {
 	slugifyThemeName,
 	removePreviewThemeFiles,
 	writeAndSetPiTheme,
 	buildThemeInstance,
+	resolvePaletteSourceColor,
 } from "./pi-theme.js";
 import { showThemePicker } from "./picker.js";
 import { getSettings, updateSettings, updateThemeParamInMemory, persistSettings, getThemeParams, getPreviewDebounceMs, loadSettings, resetThemeParams } from "./settings.js";
@@ -168,25 +169,46 @@ export default function (pi: ExtensionAPI) {
 				const factorRange = numRange(0.0, 1.0, 0.1, 1);
 				const tintRange = numRange(0.70, 0.99, 0.01, 2);
 				const contrastRange = numRange(1.5, 6.0, 0.5, 1);
+				const sourceValues = [
+					...Array.from({ length: 16 }, (_, i) => `palette[${i}]`),
+					"fg",
+					"bg",
+				];
+
+				const bg = cmuxColors?.background;
+				const fg = cmuxColors?.foreground;
+				const error = cmuxColors ? ensureSemanticHue(resolvePaletteSourceColor(cmuxColors, p.errorSource), 0, p.errorFallback) : p.errorFallback;
+				const success = cmuxColors ? ensureSemanticHue(resolvePaletteSourceColor(cmuxColors, p.successSource), 120, p.successFallback) : p.successFallback;
+				const accent = cmuxColors ? (resolvePaletteSourceColor(cmuxColors, p.accentSource) || p.accentFallback) : p.accentFallback;
+				const sourceSwatch = (source: keyof Pick<ThemeParams, "errorSource" | "successSource" | "warningSource" | "linkSource" | "accentSource" | "accentAltSource">, fallback: string): string => {
+					if (!cmuxColors) return swatch(fallback);
+					return swatch(resolvePaletteSourceColor(cmuxColors, p[source]) || fallback);
+				};
 
 				return [
 					{ id: "autoSync", label: "Auto-sync on session start", currentValue: settings.autoSync ? "on" : "off", values: ["on", "off"] },
-					{ id: "mutedWeight", label: "Muted text weight", currentValue: p.mutedWeight.toFixed(2), values: weight01, description: "fg/bg mix for muted text (higher = more fg)" },
-					{ id: "dimWeight", label: "Dim text weight", currentValue: p.dimWeight.toFixed(2), values: weight01, description: "fg/bg mix for dim text" },
-					{ id: "borderWeight", label: "Border weight", currentValue: p.borderWeight.toFixed(2), values: weight01, description: "fg/bg mix for muted borders" },
+					{ id: "mutedWeight", label: `${bg && fg ? swatch(mixColors(fg, bg, p.mutedWeight)) : ""} Muted text weight`, currentValue: p.mutedWeight.toFixed(2), values: weight01, description: "fg/bg mix for muted text (higher = more fg)" },
+					{ id: "dimWeight", label: `${bg && fg ? swatch(mixColors(fg, bg, p.dimWeight)) : ""} Dim text weight`, currentValue: p.dimWeight.toFixed(2), values: weight01, description: "fg/bg mix for dim text" },
+					{ id: "borderWeight", label: `${bg && fg ? swatch(mixColors(fg, bg, p.borderWeight)) : ""} Border weight`, currentValue: p.borderWeight.toFixed(2), values: weight01, description: "fg/bg mix for muted borders" },
 					{ id: "bgShift", label: "Background shift", currentValue: p.bgShift.toFixed(0), values: bgShiftRange, description: "Brightness offset for derived backgrounds (higher = more contrast)" },
 					{ id: "selectedBgFactor", label: "Selected bg factor", currentValue: p.selectedBgFactor.toFixed(1), values: factorRange, description: "Multiplier of bgShift for selected item bg" },
 					{ id: "userMsgBgFactor", label: "User message bg factor", currentValue: p.userMsgBgFactor.toFixed(1), values: factorRange, description: "Multiplier of bgShift for user message bg" },
 					{ id: "toolPendingBgFactor", label: "Tool pending bg factor", currentValue: p.toolPendingBgFactor.toFixed(1), values: factorRange, description: "Multiplier of bgShift for tool pending bg" },
-					{ id: "toolSuccessTint", label: "Tool success tint", currentValue: p.toolSuccessTint.toFixed(2), values: tintRange, description: "bg/success blend (higher = more bg, subtler tint)" },
-					{ id: "toolErrorTint", label: "Tool error tint", currentValue: p.toolErrorTint.toFixed(2), values: tintRange, description: "bg/error blend" },
-					{ id: "customMsgTint", label: "Custom msg tint", currentValue: p.customMsgTint.toFixed(2), values: tintRange, description: "bg/accent blend for custom messages" },
-					{ id: "errorFallback", label: `${swatch(p.errorFallback)} Error fallback`, currentValue: p.errorFallback, description: "Fallback when palette[1] hue is too far from red" },
-					{ id: "successFallback", label: `${swatch(p.successFallback)} Success fallback`, currentValue: p.successFallback, description: "Fallback when palette[2] hue is too far from green" },
-					{ id: "warningFallback", label: `${swatch(p.warningFallback)} Warning fallback`, currentValue: p.warningFallback, description: "Fallback when palette[3] hue is too far from yellow" },
-					{ id: "linkFallback", label: `${swatch(p.linkFallback)} Link fallback`, currentValue: p.linkFallback, description: "Fallback when palette[4] hue is too far from blue" },
-					{ id: "accentFallback", label: `${swatch(p.accentFallback)} Accent fallback`, currentValue: p.accentFallback, description: "Used when palette[5] is missing" },
-					{ id: "accentAltFallback", label: `${swatch(p.accentAltFallback)} Accent alt fallback`, currentValue: p.accentAltFallback, description: "Used when palette[6] is missing" },
+					{ id: "toolSuccessTint", label: `${bg ? swatch(mixColors(bg, success, p.toolSuccessTint)) : ""} Tool success tint`, currentValue: p.toolSuccessTint.toFixed(2), values: tintRange, description: "bg/success blend (higher = more bg, subtler tint)" },
+					{ id: "toolErrorTint", label: `${bg ? swatch(mixColors(bg, error, p.toolErrorTint)) : ""} Tool error tint`, currentValue: p.toolErrorTint.toFixed(2), values: tintRange, description: "bg/error blend" },
+					{ id: "customMsgTint", label: `${bg ? swatch(mixColors(bg, accent, p.customMsgTint)) : ""} Custom msg tint`, currentValue: p.customMsgTint.toFixed(2), values: tintRange, description: "bg/accent blend for custom messages" },
+					{ id: "errorSource", label: `${sourceSwatch("errorSource", p.errorFallback)} Error source`, currentValue: p.errorSource, values: sourceValues, description: "Source color for error semantic role" },
+					{ id: "successSource", label: `${sourceSwatch("successSource", p.successFallback)} Success source`, currentValue: p.successSource, values: sourceValues, description: "Source color for success semantic role" },
+					{ id: "warningSource", label: `${sourceSwatch("warningSource", p.warningFallback)} Warning source`, currentValue: p.warningSource, values: sourceValues, description: "Source color for warning semantic role" },
+					{ id: "linkSource", label: `${sourceSwatch("linkSource", p.linkFallback)} Link source`, currentValue: p.linkSource, values: sourceValues, description: "Source color for link semantic role" },
+					{ id: "accentSource", label: `${sourceSwatch("accentSource", p.accentFallback)} Accent source`, currentValue: p.accentSource, values: sourceValues, description: "Source color for accent semantic role" },
+					{ id: "accentAltSource", label: `${sourceSwatch("accentAltSource", p.accentAltFallback)} Accent alt source`, currentValue: p.accentAltSource, values: sourceValues, description: "Source color for alternate accent role" },
+					{ id: "errorFallback", label: `${swatch(p.errorFallback)} Error fallback`, currentValue: p.errorFallback, description: "Fallback when chosen source hue is too far from red" },
+					{ id: "successFallback", label: `${swatch(p.successFallback)} Success fallback`, currentValue: p.successFallback, description: "Fallback when chosen source hue is too far from green" },
+					{ id: "warningFallback", label: `${swatch(p.warningFallback)} Warning fallback`, currentValue: p.warningFallback, description: "Fallback when chosen source hue is too far from yellow" },
+					{ id: "linkFallback", label: `${swatch(p.linkFallback)} Link fallback`, currentValue: p.linkFallback, description: "Fallback when chosen source hue is too far from blue" },
+					{ id: "accentFallback", label: `${swatch(p.accentFallback)} Accent fallback`, currentValue: p.accentFallback, description: "Used when selected accent source is missing" },
+					{ id: "accentAltFallback", label: `${swatch(p.accentAltFallback)} Accent alt fallback`, currentValue: p.accentAltFallback, description: "Used when selected accent alt source is missing" },
 					{ id: "linkContrastMin", label: "Link contrast minimum", currentValue: p.linkContrastMin.toFixed(1), values: contrastRange, description: "Minimum contrast ratio for readable links (WCAG AA = 4.5)" },
 					{ id: "previewDebounceMs", label: "Preview debounce (ms)", currentValue: settings.previewDebounceMs.toFixed(0), values: numRange(50, 1000, 50, 0), description: "Cooldown before theme preview applies (lower = faster, higher = smoother navigation)" },
 				];
@@ -213,6 +235,10 @@ export default function (pi: ExtensionAPI) {
 				"errorFallback", "successFallback", "warningFallback",
 				"linkFallback", "accentFallback", "accentAltFallback",
 			]);
+			const sourceKeys = new Set<string>([
+				"errorSource", "successSource", "warningSource",
+				"linkSource", "accentSource", "accentAltSource",
+			]);
 
 			const handleValueChange = (id: string, newValue: string): void => {
 				if (id === "autoSync") {
@@ -236,6 +262,12 @@ export default function (pi: ExtensionAPI) {
 						applyPreview();
 						schedulePersist();
 					}
+					return;
+				}
+				if (sourceKeys.has(id)) {
+					updateThemeParamInMemory(id as keyof ThemeParams, newValue);
+					applyPreview();
+					schedulePersist();
 				}
 			};
 
