@@ -11,6 +11,7 @@ Detailed decision records and implementation notes live in [`docs/decisions/`](d
 
 ## UX polish
 
+- [ ] **Settings panel overhaul** — color swatches, palette role mapping, scoped settings (global vs per-theme). See [DR-03](docs/decisions/DR-03-settings-panel-ux.md).
 - [ ] Preview cleanup: ensure `cmux-preview-*` files are cleaned up on cancel and confirm
 - [ ] Status bar: show current theme params summary (e.g. "muted:0.35 dim:0.20")
 - [ ] Settings panel: add "Reset to defaults" option
