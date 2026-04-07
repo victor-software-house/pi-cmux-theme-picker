@@ -250,6 +250,7 @@ export default function (pi: ExtensionAPI) {
 						if (cmuxColors && cmuxTheme) {
 							writeAndSetPiTheme(ctx, cmuxColors, cmuxTheme, getThemeParams());
 						}
+						removePreviewThemeFiles();
 						done(undefined);
 					},
 				);
