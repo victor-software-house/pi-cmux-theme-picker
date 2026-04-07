@@ -1,5 +1,5 @@
 /**
- * TUI overlay — live cmux theme picker with debounced preview.
+ * TUI inline picker — live cmux theme picker with debounced preview.
  *
  * Design:
  * - Renders inline at the bottom (no overlay) for a cleaner look.
