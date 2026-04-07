@@ -200,97 +200,159 @@ async function executeToolPreview(
  * (syntax highlighting, diff rendering, backgrounds, timing).
  * Markdown handles user/assistant/custom messages. Box handles selected highlight.
  */
+/** Page definition for paginated preview. */
+interface PreviewPage {
+	title: string;
+	build: (theme: any) => { container: Container; executions: { comp: any; name: string; args: Record<string, unknown> }[] };
+}
+
+function getPreviewPages(): PreviewPage[] {
+	// Prepare temp file once
+	const previewDir = join(tmpdir(), "pi-theme-preview");
+	if (!existsSync(previewDir)) mkdirSync(previewDir, { recursive: true });
+	const sampleFile = join(previewDir, "auth.ts");
+	writeFileSync(sampleFile, [
+		'import { verify } from "./crypto";',
+		"",
+		"export async function login(user: string, token: string) {",
+		"  const valid = await verify(token);",
+		'  if (!valid) throw new Error("invalid token");',
+		'  return { user, role: "admin" };',
+		"}",
+	].join("\n"));
+
+	return [
+		// Page 1: Messages — user msg, assistant text, markdown, custom msg
+		{
+			title: "Messages",
+			build: (theme) => {
+				const c = new Container();
+				c.addChild(new Markdown("> Fix the auth bug in login.ts", 1, 1, getMarkdownTheme(), {
+					bgColor: (text: string) => theme.bg("userMessageBg", text),
+					color: (text: string) => theme.fg("userMessageText", text),
+				}));
+				c.addChild(new Markdown(
+					"I'll fix the **authentication** bug.\n" +
+					"Let me [read the file](src/auth.ts) first.",
+					1, 0, getMarkdownTheme(),
+				));
+				c.addChild(new Spacer(1));
+				c.addChild(new Markdown(
+					"## Done\n" +
+					"- Added `\"HS256\"` algorithm parameter\n" +
+					"- All tests [passing](results.txt)\n\n" +
+					"> **Note:** review before merging",
+					1, 0, getMarkdownTheme(),
+				));
+				c.addChild(new Spacer(1));
+				c.addChild(new Markdown("Waiting for approval", 1, 1, getMarkdownTheme(), {
+					bgColor: (text: string) => theme.bg("customMessageBg", text),
+					color: (text: string) => theme.fg("customMessageText", text),
+				}));
+				c.addChild(new Spacer(1));
+				const selBox = new Box(1, 0, (text: string) => theme.bg("selectedBg", text));
+				selBox.addChild(new Text("\u2192 Selected item highlight", 0, 0));
+				c.addChild(selBox);
+				return { container: c, executions: [] };
+			},
+		},
+		// Page 2: Read tool
+		{
+			title: "Read",
+			build: (_theme) => {
+				const c = new Container();
+				const args = { path: sampleFile, limit: 7 };
+				const comp = createToolPreviewSync("read", args);
+				if (comp) c.addChild(comp);
+				c.addChild(new Text(" Syntax-highlighted file content with\n line numbers and truncation.", 1, 1));
+				return { container: c, executions: comp ? [{ comp, name: "read", args }] : [] };
+			},
+		},
+		// Page 3: Edit tool
+		{
+			title: "Edit",
+			build: (_theme) => {
+				// Re-write file so edit can find the original text
+				writeFileSync(sampleFile, [
+					'import { verify } from "./crypto";',
+					"",
+					"export async function login(user: string, token: string) {",
+					"  const valid = await verify(token);",
+					'  if (!valid) throw new Error("invalid token");',
+					'  return { user, role: "admin" };',
+					"}",
+				].join("\n"));
+				const c = new Container();
+				const args = {
+					path: sampleFile,
+					edits: [{ oldText: "  const valid = await verify(token);", newText: '  const valid = await verify(token, "HS256");' }],
+				};
+				const comp = createToolPreviewSync("edit", args);
+				if (comp) c.addChild(comp);
+				c.addChild(new Text(" Inline diff with added/removed highlighting.", 1, 1));
+				return { container: c, executions: comp ? [{ comp, name: "edit", args }] : [] };
+			},
+		},
+		// Page 4: Bash tool
+		{
+			title: "Bash",
+			build: (_theme) => {
+				const c = new Container();
+				const args = { command: "echo 'Tests passed: 3/3'" };
+				const comp = createToolPreviewSync("bash", args);
+				if (comp) c.addChild(comp);
+				c.addChild(new Text(" Command execution with exit status\n and timing display.", 1, 1));
+				return { container: c, executions: comp ? [{ comp, name: "bash", args }] : [] };
+			},
+		},
+	];
+}
+
 class ThemePreview implements Component {
-	private container = new Container();
+	private pages: PreviewPage[] = [];
+	private pageIdx = 0;
+	private pageContainer = new Container();
 	_pendingExecutions: { comp: any; name: string; args: Record<string, unknown> }[] = [];
 
 	// biome-ignore lint: Theme proxy has typed keys but we use string-based lookups
 	rebuild(t: () => any): void {
 		const theme = t();
-		this.container = new Container();
 		this.setBorderFn(
 			(s: string) => theme.fg("borderMuted", s),
 			(s: string) => theme.fg("accent", s),
 		);
-
-		// --- User message ---
-		this.container.addChild(new Markdown("> Fix the auth bug", 1, 1, getMarkdownTheme(), {
-			bgColor: (text: string) => theme.bg("userMessageBg", text),
-			color: (text: string) => theme.fg("userMessageText", text),
-		}));
-
-		// --- Assistant text ---
-		this.container.addChild(new Markdown(
-			"I'll fix the **auth** bug. Let me [read](src/auth.ts) the file.",
-			1, 0, getMarkdownTheme(),
-		));
-
-		// --- Tool calls using Pi's actual tools against temp files ---
-		const previewDir = join(tmpdir(), "pi-theme-preview");
-		if (!existsSync(previewDir)) mkdirSync(previewDir, { recursive: true });
-		const sampleFile = join(previewDir, "auth.ts");
-		writeFileSync(sampleFile, [
-			'import { verify } from "./crypto";',
-			"",
-			"export async function login(user: string, token: string) {",
-			"  const valid = await verify(token);",
-			"  if (!valid) throw new Error(\"invalid token\");",
-			"  return { user, role: \"admin\" };",
-			"}",
-		].join("\n"));
-
-		const readArgs = { path: sampleFile, limit: 7 };
-		const readComp = createToolPreviewSync("read", readArgs);
-		if (readComp) this.container.addChild(readComp);
-
-		const editArgs = {
-			path: sampleFile,
-			edits: [{ oldText: '  const valid = await verify(token);', newText: '  const valid = await verify(token, "HS256");' }],
-		};
-		const editComp = createToolPreviewSync("edit", editArgs);
-		if (editComp) this.container.addChild(editComp);
-
-		const bashArgs = { command: "echo 'Tests passed: 3/3'" };
-		const bashComp = createToolPreviewSync("bash", bashArgs);
-		if (bashComp) this.container.addChild(bashComp);
-
-		// Execute tools async — components update in place when results arrive.
-		this._pendingExecutions = [];
-		if (readComp) this._pendingExecutions.push({ comp: readComp, name: "read", args: readArgs });
-		if (editComp) this._pendingExecutions.push({ comp: editComp, name: "edit", args: editArgs });
-		if (bashComp) this._pendingExecutions.push({ comp: bashComp, name: "bash", args: bashArgs });
-
-		// --- Assistant markdown response ---
-		this.container.addChild(new Markdown(
-			"## Done\n" +
-			"- Added `\"HS256\"` algorithm param\n" +
-			"- All tests [passing](results.txt)\n\n" +
-			"> **Note:** review before merging",
-			1, 0, getMarkdownTheme(),
-		));
-
-		// --- Custom message ---
-		this.container.addChild(new Markdown("Waiting for approval", 1, 1, getMarkdownTheme(), {
-			bgColor: (text: string) => theme.bg("customMessageBg", text),
-			color: (text: string) => theme.fg("customMessageText", text),
-		}));
+		if (this.pages.length === 0) this.pages = getPreviewPages();
+		const page = this.pages[this.pageIdx];
+		if (!page) return;
+		const { container, executions } = page.build(theme);
+		this.pageContainer = container;
+		this._pendingExecutions = executions;
 	}
 
-	invalidate(): void { this.container.invalidate(); }
+	nextPage(): void { this.pageIdx = (this.pageIdx + 1) % this.pages.length; }
+	prevPage(): void { this.pageIdx = (this.pageIdx - 1 + this.pages.length) % this.pages.length; }
+	getPageLabel(): string {
+		const p = this.pages[this.pageIdx];
+		return p ? `${p.title} (${this.pageIdx + 1}/${this.pages.length})` : "";
+	}
+
+	invalidate(): void { this.pageContainer.invalidate(); }
 
 	render(width: number): string[] {
 		const inner = Math.max(1, width - 2);
-		const content = this.container.render(inner);
+		const content = this.pageContainer.render(inner);
 
-		// Border using theme border color via the live theme proxy
 		const b = (s: string) => this.borderFn?.(s) ?? s;
-		const title = this.titleFn?.(" Preview ") ?? " Preview ";
+		const label = this.getPageLabel();
+		const title = this.titleFn?.(` ${label} `) ?? ` ${label} `;
 		const titleW = title.replace(/\x1b\[[^m]*m/g, "").length;
 		const topFill = Math.max(0, inner - titleW);
 		const top = b("\u256D") + title + b("\u2500".repeat(topFill)) + b("\u256E");
-		const bot = b("\u2570") + b("\u2500".repeat(inner)) + b("\u256F");
+		const hint = this.hintFn?.(" [ ] pages \u00B7 p hide") ?? " [ ] pages \u00B7 p hide";
+		const hintW = hint.replace(/\x1b\[[^m]*m/g, "").length;
+		const botFill = Math.max(0, inner - hintW);
+		const bot = b("\u2570") + hint + b("\u2500".repeat(botFill)) + b("\u256F");
 		const wrap = (line: string): string => {
-			// Pad line to inner width for clean right border
 			const vis = line.replace(/\x1b\[[^m]*m/g, "").length;
 			const pad = Math.max(0, inner - vis);
 			return b("\u2502") + line + " ".repeat(pad) + b("\u2502");
@@ -300,9 +362,11 @@ class ThemePreview implements Component {
 
 	private borderFn?: (s: string) => string;
 	private titleFn?: (s: string) => string;
+	private hintFn?: (s: string) => string;
 	setBorderFn(border: (s: string) => string, title: (s: string) => string): void {
 		this.borderFn = border;
 		this.titleFn = title;
+		this.hintFn = (s: string) => border(s); // hints use border color
 	}
 }
 
@@ -518,7 +582,7 @@ export default function (pi: ExtensionAPI) {
 
 				container.addChild(headerText);
 				container.addChild(settingsList);
-				container.addChild(new Text(t().fg("dim", " \u2190\u2192 adjust \u00B7 tab scope \u00B7 d clear override \u00B7 r reset \u00B7 p preview"), 1, 0));
+				container.addChild(new Text(t().fg("dim", " \u2190\u2192 adjust \u00B7 tab scope \u00B7 d clear \u00B7 r reset \u00B7 p preview \u00B7 [ ] pages"), 1, 0));
 
 				// Theme preview overlay — non-capturing, anchored right.
 				const preview = new ThemePreview();
@@ -604,6 +668,13 @@ export default function (pi: ExtensionAPI) {
 								persistSettings();
 								refreshItems();
 								applyPreview();
+								tui.requestRender();
+							}
+							return;
+						} else if (data === "[" || data === "]") {
+							if (!previewHandle.isHidden()) {
+								if (data === "]") preview.nextPage(); else preview.prevPage();
+								updatePreview();
 								tui.requestRender();
 							}
 							return;
