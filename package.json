@@ -1,0 +1,48 @@
+{
+  "name": "pi-cmux-theme-picker",
+  "version": "0.1.0",
+  "description": "Live cmux terminal theme picker for Pi with synchronized pi + cmux theme switching and debounced preview.",
+  "license": "MIT",
+  "author": "Victor Software House",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/victor-software-house/pi-cmux-theme-picker.git"
+  },
+  "homepage": "https://github.com/victor-software-house/pi-cmux-theme-picker#readme",
+  "bugs": {
+    "url": "https://github.com/victor-software-house/pi-cmux-theme-picker/issues"
+  },
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "pi-coding-agent",
+    "cmux",
+    "ghostty",
+    "theme",
+    "theme-picker"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  },
+  "type": "module",
+  "files": [
+    "extensions",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*"
+  },
+  "devDependencies": {
+    "@mariozechner/pi-coding-agent": "^0.63.0",
+    "@mariozechner/pi-tui": "^0.63.0",
+    "@types/node": "^24.3.0",
+    "typescript": "^5.9.3"
+  }
+}
