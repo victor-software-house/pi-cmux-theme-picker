@@ -102,7 +102,7 @@ function parseCommandThemeName(args: string): string {
 /** Render a single truecolor block for a hex color. */
 function swatch(hex: string): string {
 	const { r, g, b } = hexToRgb(hex);
-	return `\x1b[38;2;${r};${g};${b}m\u2588\x1b[0m`;
+	return `\x1b[38;2;${r};${g};${b}m\u2588\x1b[39m`;
 }
 
 /** Generate a string[] of numeric values from min to max with given step, formatted to decimals. */
