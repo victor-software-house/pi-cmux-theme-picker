@@ -209,9 +209,11 @@ class ThemePreview implements Component {
 		));
 
 		// --- Tool calls using Pi's actual ToolExecutionComponent ---
+		const sampleCode = "export function login(user: string) {\n  validateToken(user.token);\n}";
 		const readTool = createToolPreview("read", { path: "src/login.ts" }, {
-			content: [{ type: "text", text: "export function login(user: string) {\n  validateToken(user.token);\n}" }],
-			details: "3 lines", isError: false,
+			content: [{ type: "text", text: sampleCode }],
+			details: { _type: "readFile", filePath: "src/login.ts", content: sampleCode, offset: 1, lineCount: 3 },
+			isError: false,
 		});
 		if (readTool) this.container.addChild(readTool);
 
@@ -227,7 +229,8 @@ class ThemePreview implements Component {
 
 		const bashTool = createToolPreview("bash", { command: "npm test" }, {
 			content: [{ type: "text", text: "Error: test suite failed\n  at login.test.ts:15" }],
-			details: "exit 1 (2 lines)", isError: true,
+			details: { rawText: "Error: test suite failed\n  at login.test.ts:15", exitCode: 1 },
+			isError: true,
 		});
 		if (bashTool) this.container.addChild(bashTool);
 
