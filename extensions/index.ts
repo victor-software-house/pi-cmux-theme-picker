@@ -18,7 +18,18 @@ import {
 	resolvePaletteSourceColor,
 } from "./pi-theme.js";
 import { showThemePicker } from "./picker.js";
-import { getSettings, updateSettings, updateThemeParamInMemory, persistSettings, getThemeParams, getPreviewDebounceMs, loadSettings, resetThemeParams } from "./settings.js";
+import {
+	getSettings,
+	updateSettings,
+	updateThemeParamInMemory,
+	persistSettings,
+	getThemeParams,
+	getPreviewDebounceMs,
+	loadSettings,
+	resetThemeParams,
+	setOverrideEnabled,
+	clearOverrideParam,
+} from "./settings.js";
 import { DEFAULT_THEME_PARAMS, type SessionContext, type ThemeParams } from "./types.js";
 import { debounce } from "perfect-debounce";
 
@@ -73,7 +84,7 @@ function syncCurrentCmuxThemeToPi(ctx: SessionContext): void {
 	const slug = slugifyThemeName(currentTheme);
 	const themeName = slug ? `cmux-sync-${slug}` : "cmux-sync";
 	if (ctx.ui.theme.name === themeName) return;
-	const params = getThemeParams();
+	const params = getThemeParams(slug);
 	writeAndSetPiTheme(ctx, colors, currentTheme, params);
 	updateStatus(ctx, currentTheme, params);
 }
@@ -136,7 +147,7 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 				removePreviewThemeFiles();
-				const params = getThemeParams();
+				const params = getThemeParams(slugifyThemeName(themeArg));
 				writeAndSetPiTheme(ctx, colors, themeArg, params);
 				runCmuxThemeSet(themeArg);
 				updateStatus(ctx, themeArg, params);
@@ -146,7 +157,7 @@ export default function (pi: ExtensionAPI) {
 
 			const selected = await showThemePicker(pi, ctx);
 			if (selected) {
-				updateStatus(ctx, selected, getThemeParams());
+				updateStatus(ctx, selected, getThemeParams(slugifyThemeName(selected)));
 				ctx.ui.notify(`Theme "${selected}" applied`, "info");
 			}
 		},
@@ -159,9 +170,13 @@ export default function (pi: ExtensionAPI) {
 		handler: async (_args, ctx) => {
 			const cmuxTheme = getCurrentCmuxThemeName();
 			const cmuxColors = cmuxTheme ? getCmuxThemeColors(cmuxTheme) : null;
+			const currentThemeSlug = cmuxTheme ? slugifyThemeName(cmuxTheme) : null;
+			let scope: "global" | string = "global";
+			const scopeLabel = (): string => (scope === "global" ? "global" : scope);
+			const paramsForScope = (): ThemeParams => (scope === "global" ? getThemeParams() : getThemeParams(scope));
 
 			const buildItems = (): SettingItem[] => {
-				const p = getThemeParams();
+				const p = paramsForScope();
 				const settings = getSettings();
 
 				const weight01 = numRange(0.0, 1.0, 0.05, 2);
@@ -218,7 +233,7 @@ export default function (pi: ExtensionAPI) {
 			const applyPreview = debounce(() => {
 				if (!cmuxColors || !cmuxTheme) return;
 				const slug = slugifyThemeName(cmuxTheme);
-				const instance = buildThemeInstance(cmuxColors, `cmux-preview-${slug}-${Date.now()}`, getThemeParams(), ctx);
+				const instance = buildThemeInstance(cmuxColors, `cmux-preview-${slug}-${Date.now()}`, paramsForScope(), ctx);
 				ctx.ui.setTheme(instance);
 			}, getPreviewDebounceMs());
 
@@ -250,7 +265,7 @@ export default function (pi: ExtensionAPI) {
 					return;
 				}
 				if (numericKeys.has(id)) {
-					updateThemeParamInMemory(id as keyof ThemeParams, parseFloat(newValue));
+					updateThemeParamInMemory(id as keyof ThemeParams, parseFloat(newValue), scope);
 					applyPreview();
 					schedulePersist();
 					return;
@@ -258,14 +273,14 @@ export default function (pi: ExtensionAPI) {
 				if (colorKeys.has(id)) {
 					const hex = newValue.startsWith("#") ? newValue : `#${newValue}`;
 					if (/^#[0-9a-fA-F]{6}$/.test(hex)) {
-						updateThemeParamInMemory(id as keyof ThemeParams, hex);
+						updateThemeParamInMemory(id as keyof ThemeParams, hex, scope);
 						applyPreview();
 						schedulePersist();
 					}
 					return;
 				}
 				if (sourceKeys.has(id)) {
-					updateThemeParamInMemory(id as keyof ThemeParams, newValue);
+					updateThemeParamInMemory(id as keyof ThemeParams, newValue, scope);
 					applyPreview();
 					schedulePersist();
 				}
@@ -318,16 +333,18 @@ export default function (pi: ExtensionAPI) {
 						schedulePersist.flush();
 						// Write final theme with clean name — same as /theme confirm
 						if (cmuxColors && cmuxTheme) {
-							writeAndSetPiTheme(ctx, cmuxColors, cmuxTheme, getThemeParams());
+							writeAndSetPiTheme(ctx, cmuxColors, cmuxTheme, getThemeParams(currentThemeSlug ?? undefined));
 						}
 						removePreviewThemeFiles();
 						done(undefined);
 					},
 				);
 
-				container.addChild(new Text(t().fg("accent", t().bold(" Theme Generation Settings")), 1, 0));
+				const headerText = new Text(t().fg("accent", t().bold(` Theme Generation Settings [${scopeLabel()}]`)), 1, 0);
+				const hintText = new Text(t().fg("dim", " \u2190\u2192 adjust \u00B7 enter/space cycle \u00B7 tab scope \u00B7 d clear override \u00B7 r reset \u00B7 esc close"), 1, 0);
+				container.addChild(headerText);
 				container.addChild(settingsList);
-				container.addChild(new Text(t().fg("dim", " \u2190\u2192 adjust \u00B7 enter/space cycle \u00B7 r reset \u00B7 esc close"), 1, 0));
+				container.addChild(hintText);
 
 				return {
 					render: (w) => container.render(w),
@@ -345,8 +362,41 @@ export default function (pi: ExtensionAPI) {
 							cycleSelected(-1);
 							tui.requestRender();
 							return;
+						} else if (matchesKey(data, Key.tab)) {
+							if (!currentThemeSlug) return;
+							if (scope === "global") {
+								scope = currentThemeSlug;
+								setOverrideEnabled(currentThemeSlug, true);
+							} else {
+								scope = "global";
+								setOverrideEnabled(currentThemeSlug, false);
+							}
+							headerText.setText(t().fg("accent", t().bold(` Theme Generation Settings [${scopeLabel()}]`)));
+							refreshItems();
+							applyPreview();
+							schedulePersist();
+							tui.requestRender();
+							return;
+						} else if (data.toLowerCase() === "d") {
+							if (scope === "global") return;
+							const item = items[selectedIdx];
+							if (!item) return;
+							if (Object.hasOwn(DEFAULT_THEME_PARAMS, item.id)) {
+								clearOverrideParam(scope, item.id as keyof ThemeParams);
+								persistSettings();
+								refreshItems();
+								applyPreview();
+								tui.requestRender();
+							}
+							return;
 						} else if (data.toLowerCase() === "r") {
-							resetThemeParams();
+							if (scope === "global") {
+								resetThemeParams("global");
+							} else {
+								resetThemeParams(scope);
+								scope = "global";
+								headerText.setText(t().fg("accent", t().bold(` Theme Generation Settings [${scopeLabel()}]`)));
+							}
 							refreshItems();
 							applyPreview();
 							tui.requestRender();
