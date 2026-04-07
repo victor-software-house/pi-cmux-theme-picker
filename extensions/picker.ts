@@ -95,7 +95,10 @@ export async function showThemePicker(ctx: CommandContext): Promise<string | nul
 			prewritten.add(themeName);
 		}
 		ctx.ui.setTheme(previewNameFor(themeName));
-		runCmuxThemeSet(themeName);
+		// Defer cmux slightly so Pi's render cycle completes first.
+		// setTheme queues a re-render for the next tick; cmux escape sequences
+		// are near-instant, so without the delay cmux wins the race visually.
+		setTimeout(() => runCmuxThemeSet(themeName), 30);
 	};
 
 	const schedulePreview = (themeName: string): void => {
