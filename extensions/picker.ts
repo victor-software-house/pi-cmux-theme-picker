@@ -36,8 +36,14 @@ export async function showThemePicker(_pi: ExtensionAPI, ctx: CommandContext): P
 	}
 
 	const entryByName = new Map(entries.map((e) => [e.name, e]));
-	const originalPiTheme = ctx.ui.theme;
 	const originalCmuxTheme = getCurrentCmuxThemeName();
+
+	// ctx.ui.theme is a Proxy (always reflects current) — can't capture a snapshot.
+	// Build a restore instance from the current cmux colors + params.
+	const originalCmuxColors = originalCmuxTheme ? entryByName.get(originalCmuxTheme)?.colors : null;
+	const originalInstance = originalCmuxColors
+		? buildThemeInstance(originalCmuxColors, `cmux-restore-${Date.now()}`, getThemeParams(), ctx)
+		: null;
 
 	let filterMode: FilterMode = "all";
 	let searchText = "";
@@ -45,13 +51,15 @@ export async function showThemePicker(_pi: ExtensionAPI, ctx: CommandContext): P
 		? originalCmuxTheme
 		: entries[0]!.name;
 	let closed = false;
+	let lastAppliedTheme: string | null = null;
 	let previewSeq = 0;
 
 	// --- Decoupled preview: debounced, reads latest selectedTheme ---
 	const applyPreview = debounce(() => {
-		if (closed) return;
+		if (closed || selectedTheme === lastAppliedTheme) return;
 		const entry = entryByName.get(selectedTheme);
 		if (!entry) return;
+		lastAppliedTheme = selectedTheme;
 		// Unique name per preview call — renderer caches keyed on theme.name always invalidate
 		const instance = buildThemeInstance(entry.colors, `cmux-preview-${selectedTheme}-${++previewSeq}`, getThemeParams(), ctx);
 		ctx.ui.setTheme(instance);
@@ -73,7 +81,7 @@ export async function showThemePicker(_pi: ExtensionAPI, ctx: CommandContext): P
 		if (closed) return;
 		closed = true;
 		applyPreview.cancel();
-		ctx.ui.setTheme(originalPiTheme);
+		if (originalInstance) ctx.ui.setTheme(originalInstance);
 		if (originalCmuxTheme) runCmuxThemeSet(originalCmuxTheme);
 		done(null);
 	};
