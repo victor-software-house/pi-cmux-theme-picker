@@ -1,515 +1,328 @@
-# PLAN: Migrate from semantic-release to changesets (DR-01 + DR-02)
+# PLAN — UX Polish Execution Slice
 
-**Branch:** `chore/changesets-migration`
-**Base:** `main`
-**PR title:** `chore: migrate from semantic-release to changesets`
-**Version impact:** none — no changeset file included, no npm release triggered.
+Implements all items from the **UX polish** section of ROADMAP.md plus the full DR-03 design.
 
 ---
 
-## Context
+## Overview
 
-This project (`pi-cmux-theme-picker`, v0.3.0) currently uses `semantic-release` to publish to npm on every push to `main`. This causes version churn, accidental bumps, and no human review gate before publishing.
+Four UX work streams, ordered by dependency:
 
-We are migrating to `@changesets/cli` with the GitHub changesets action for batched, PR-gated releases with OIDC trusted publishing (no npm tokens).
+1. **Preview cleanup** — ensure `cmux-preview-*` files are removed on cancel and confirm
+2. **Status bar params summary** — show current ThemeParams snapshot in the status bar
+3. **Settings panel: "Reset to defaults"** — add a reset action to `/theme-settings`
+4. **Settings panel overhaul (DR-03)** — color swatches, palette role mapping, scoped settings
 
-Decision records:
-- `docs/decisions/DR-01-changesets-migration.md` — full rationale and migration design
-- `docs/decisions/DR-02-force-bump-rules.md` — superseded by DR-01 (changesets handles force bumps naturally)
-
-## Decisions (confirmed)
-
-- **D1:** Bun is the sole package manager (`bun add`, `bun install --frozen-lockfile` in CI).
-- **D2:** Two GitHub Actions workflows: `ci.yml` (validation) and `release.yml` (changesets action).
-- **D3:** OIDC trusted publishing stays. `id-token: write` in `release.yml`. No `NPM_TOKEN`.
-- **D4:** Lefthook hooks (commitlint, lockfile sync, typecheck) unchanged.
-- **D5:** Existing CHANGELOG.md entries preserved. Changesets appends in its own format.
-- **D6:** `@changesets/changelog-github` for PR-linked changelog entries.
-- **D7:** No post-publish `[skip ci]` commit. "Version Packages" PR merge carries bumps natively.
-- **D8:** DR-02 status → `superseded by DR-01`. Never implemented.
-- **D9:** Work on branch `chore/changesets-migration`. No direct push to main.
-- **D10:** No changeset file in this PR → no npm release on merge.
-- **D11:** PR opened via `gh pr create` at the end.
-- Branch protection / rulesets are out of scope (separate follow-up).
+Stream 4 is the largest and breaks into sub-tasks below.
 
 ---
 
-## Steps
+## 1. Preview cleanup
 
-### Step 1: Create feature branch
+**Problem:** `cmux-preview-*` theme files in `~/.pi/agent/themes/` may survive if the picker exits abnormally or if a code path skips cleanup.
 
-```bash
-git checkout -b chore/changesets-migration main
+**Current state:** `removePreviewThemeFiles()` exists in `pi-theme.ts` and is called at the start of `/theme` direct-arg invocations, but never after picker cancel or confirm.
+
+**Changes:**
+
+| File | Change |
+|:--|:--|
+| `picker.ts` → `closeWithConfirm` | Call `removePreviewThemeFiles()` after `writeAndSetPiTheme` |
+| `picker.ts` → `closeWithCancel` | Call `removePreviewThemeFiles()` after restoring original theme |
+| `index.ts` → `/theme-settings` close handler | Call `removePreviewThemeFiles()` after `writeAndSetPiTheme` in the `onCancel` / close path |
+
+**Verification:** After picking or cancelling a theme, `ls ~/.pi/agent/themes/ | grep cmux-preview` returns nothing.
+
+---
+
+## 2. Status bar params summary
+
+**Problem:** The status bar shows `theme:<name>` but gives no hint about active generation params. Users must open `/theme-settings` just to see what's active.
+
+**Design:** Extend the status bar to include a compact params summary when non-default values exist.
+
+Format: `theme:nord · muted:0.65 dim:0.45 bg:12` (only params that differ from `DEFAULT_THEME_PARAMS`).
+
+**Changes:**
+
+| File | Change |
+|:--|:--|
+| `index.ts` → `updateStatus()` | Accept optional `ThemeParams`. Compare each key against `DEFAULT_THEME_PARAMS`. Build a compact `key:value` string for non-default params. Append after the theme name with ` · ` separator. Truncate if > ~60 chars to avoid status overflow. |
+| `index.ts` → all callsites of `updateStatus` | Pass `getThemeParams()` as second arg |
+
+**Compact key mapping** (short labels for status bar):
+
+| Param | Short key |
+|:--|:--|
+| `mutedWeight` | `muted` |
+| `dimWeight` | `dim` |
+| `borderWeight` | `border` |
+| `bgShift` | `bg` |
+| `selectedBgFactor` | `selBg` |
+| `userMsgBgFactor` | `msgBg` |
+| `toolPendingBgFactor` | `pendBg` |
+| `toolSuccessTint` | `okTint` |
+| `toolErrorTint` | `errTint` |
+| `customMsgTint` | `custTint` |
+| `linkContrastMin` | `linkCR` |
+| `previewDebounceMs` | (omit — not theme-visible) |
+| Fallback hex colors | (omit — too long, not useful in status) |
+
+---
+
+## 3. Settings panel: "Reset to defaults"
+
+**Problem:** No way to reset all ThemeParams back to defaults without manually cycling each value.
+
+**Design:** Add a reset action triggered by a keybinding (`r` key).
+
+**Changes:**
+
+| File | Change |
+|:--|:--|
+| `index.ts` → `/theme-settings` `handleInput` | On `r` key: reset `current.themeParams` to `{ ...DEFAULT_THEME_PARAMS }`, call `persistSettings()`, rebuild SettingsList items, `applyPreview()`, `requestRender()`. |
+| `index.ts` → help footer | Add `r reset` to the key hint line |
+| `settings.ts` | Add `resetThemeParams()` helper: sets `current.themeParams = { ...DEFAULT_THEME_PARAMS }` and persists |
+
+When scoped settings land (task 4), reset in global mode resets global; reset in per-theme mode clears the per-theme overrides.
+
+---
+
+## 4. Settings panel overhaul (DR-03)
+
+### 4a. Types — palette role source settings
+
+Add new fields to `ThemeParams` in `types.ts`:
+
+```ts
+// Palette role mapping — which palette index feeds each semantic role
+errorSource: PaletteSource;     // default: "palette[1]"
+successSource: PaletteSource;   // default: "palette[2]"
+warningSource: PaletteSource;   // default: "palette[3]"
+linkSource: PaletteSource;      // default: "palette[4]"
+accentSource: PaletteSource;    // default: "palette[5]"
+accentAltSource: PaletteSource; // default: "palette[6]"
 ```
 
-**Verify:** `git branch --show-current` outputs `chore/changesets-migration`.
+Where `PaletteSource` is:
 
----
-
-### Step 2: Remove semantic-release dependencies
-
-Remove all semantic-release packages from `package.json` devDependencies:
-
-```bash
-bun remove semantic-release @semantic-release/changelog @semantic-release/git @semantic-release/github @semantic-release/npm
+```ts
+export type PaletteSource =
+  | `palette[${number}]`
+  | "fg"
+  | "bg";
 ```
 
-**Verify:** `package.json` devDependencies contains none of the five packages above. `bun.lock` is regenerated.
+Add a resolver function:
 
----
-
-### Step 3: Install changesets dependencies
-
-```bash
-bun add -D @changesets/cli @changesets/changelog-github
+```ts
+export function resolveSource(source: PaletteSource, colors: CmuxColors): string | undefined
 ```
 
-**Verify:** `package.json` devDependencies contains `@changesets/cli` and `@changesets/changelog-github`.
+Maps `"palette[N]"` → `colors.palette[N]`, `"fg"` → `colors.foreground`, `"bg"` → `colors.background`.
 
----
+Update `DEFAULT_THEME_PARAMS` with the new defaults.
 
-### Step 4: Initialize changesets
+### 4b. Theme generation — use palette role mapping
 
-```bash
-bunx changeset init
+In `pi-theme.ts` → `generatePiTheme()`:
+
+Replace hardcoded `colors.palette[1]` etc. with `resolveSource(p.errorSource, colors)` etc.
+
+Before:
+```ts
+const error = ensureSemanticHue(colors.palette[1], 0, p.errorFallback);
 ```
 
-This creates `.changeset/config.json` and `.changeset/README.md`.
+After:
+```ts
+const error = ensureSemanticHue(resolveSource(p.errorSource, colors), 0, p.errorFallback);
+```
 
-Then **overwrite** `.changeset/config.json` with exactly:
+Same pattern for success, warning, link, accent, accentAlt.
 
-```json
-{
-  "$schema": "https://unpkg.com/@changesets/config@3/schema.json",
-  "changelog": [
-    "@changesets/changelog-github",
-    { "repo": "victor-software-house/pi-cmux-theme-picker" }
-  ],
-  "commit": false,
-  "fixed": [],
-  "linked": [],
-  "access": "public",
-  "baseBranch": "main",
-  "updateInternalDependencies": "patch",
-  "ignore": []
+### 4c. Extended color swatches
+
+Extend the `swatch()` helper and add a `computedSwatch()` that shows the mixed/tinted result.
+
+**New swatches to show in settings panel:**
+
+| Setting | Swatch shows |
+|:--|:--|
+| `mutedWeight` | `mixColors(fg, bg, value)` — preview of muted text color |
+| `dimWeight` | `mixColors(fg, bg, value)` — preview of dim text color |
+| `borderWeight` | `mixColors(fg, bg, value)` — preview of border color |
+| `toolSuccessTint` | `mixColors(bg, success, value)` — preview of success bg tint |
+| `toolErrorTint` | `mixColors(bg, error, value)` — preview of error bg tint |
+| `customMsgTint` | `mixColors(bg, accent, value)` — preview of custom msg bg tint |
+| `*Source` settings | Raw palette color at that index |
+| `*Fallback` settings | Already have swatches ✔ |
+
+Requires passing `cmuxColors` into `buildItems()` (already available in the handler scope).
+
+### 4d. Palette role mapping settings UI
+
+Add six new `SettingItem` entries in `buildItems()`, one per semantic role:
+
+```
+Error source       palette[1]    ← cycles through palette[0]..palette[15], fg, bg
+Success source     palette[2]
+Warning source     palette[3]
+Link source        palette[4]
+Accent source      palette[5]
+Accent alt source  palette[6]
+```
+
+Each shows a swatch of the resolved color. `values` array: `["palette[0]", ..., "palette[15]", "fg", "bg"]`.
+
+Handle in `handleValueChange`: write to `ThemeParams` as a string, same as fallback hex values.
+
+### 4e. Settings — scoped settings (global vs per-theme)
+
+**Types** (`settings.ts`):
+
+```ts
+export interface ThemeOverride {
+  enabled: boolean;
+  params: Partial<ThemeParams>;
+}
+
+export interface Settings {
+  autoSync: boolean;
+  themeParams: ThemeParams;
+  previewDebounceMs: number;
+  themeOverrides: Record<string, ThemeOverride>;  // keyed by cmux theme slug
 }
 ```
 
-**Verify:** `.changeset/config.json` exists with the content above. `.changeset/README.md` exists.
+**Resolution** (`settings.ts`):
+
+```ts
+export function getThemeParams(themeSlug?: string): ThemeParams {
+  const base = current.themeParams;
+  if (!themeSlug) return base;
+  const override = current.themeOverrides[themeSlug];
+  if (!override?.enabled) return base;
+  return { ...base, ...override.params };
+}
+```
+
+**Mutation** (`settings.ts`):
+
+```ts
+export function updateThemeParamInMemory<K extends keyof ThemeParams>(
+  key: K,
+  value: ThemeParams[K],
+  scope: "global" | string, // string = theme slug for per-theme
+): void {
+  if (scope === "global") {
+    current.themeParams[key] = value;
+  } else {
+    if (!current.themeOverrides[scope]) {
+      current.themeOverrides[scope] = { enabled: true, params: {} };
+    }
+    current.themeOverrides[scope].params[key] = value;
+  }
+}
+```
+
+**New helpers:**
+
+- `setOverrideEnabled(slug: string, enabled: boolean)` — toggles `themeOverrides[slug].enabled`
+- `clearOverrideParam(slug: string, key: keyof ThemeParams)` — deletes a single per-theme override
+- `clearAllOverrides(slug: string)` — removes `themeOverrides[slug]` entirely
+- `resetThemeParams(scope: "global" | string)` — resets global or per-theme params to defaults
+
+### 4f. Settings panel — scope toggle UI
+
+**State:** Add `scope: "global" | string` to the settings panel (default: `"global"`). The string value is the current cmux theme slug.
+
+**Header:** `" Theme Generation Settings [global]"` or `" Theme Generation Settings [catppuccin-mocha]"`.
+
+**Toggle:** `Tab` key switches between global and per-theme (using current cmux theme slug from `getCurrentCmuxThemeName()`).
+
+- Switching to global: sets `themeOverrides[slug].enabled = false`.
+- Switching to per-theme: sets `themeOverrides[slug].enabled = true`. Seeds initial per-theme params from the current resolved params if the override entry doesn't exist yet.
+
+**Per-theme visual indicators:**
+
+- Values that match global show normally.
+- Values that differ from global show with an accent-colored `*` prefix.
+- The description line for overridden values appends `(overrides global: <globalValue>)`.
+
+**Reset behavior (`r` key):**
+
+- In global scope: resets `themeParams` to `DEFAULT_THEME_PARAMS`.
+- In per-theme scope: clears all per-theme overrides for current theme (`clearAllOverrides(slug)`), toggles `enabled = false`, switches scope back to global.
+
+**Per-setting reset (`d` key — "delete override"):**
+
+- Only active in per-theme scope.
+- Removes the override for the selected setting (`clearOverrideParam(slug, key)`).
+- Value falls back to global.
+
+### 4g. Callers — pass theme slug
+
+Update all callers of `getThemeParams()` to pass the current cmux theme slug where available:
+
+| Callsite | Change |
+|:--|:--|
+| `index.ts` → `syncCurrentCmuxThemeToPi` | `getThemeParams(slugifyThemeName(currentTheme))` |
+| `index.ts` → `/theme` direct apply | `getThemeParams(slugifyThemeName(themeArg))` |
+| `index.ts` → `/theme-settings` | `getThemeParams(cmuxTheme ? slugifyThemeName(cmuxTheme) : undefined)` |
+| `picker.ts` → `applyPreview` debounce | `getThemeParams(slugifyThemeName(selectedTheme))` |
+| `picker.ts` → `closeWithConfirm` | `getThemeParams(slugifyThemeName(themeName))` |
+| `picker.ts` → `closeWithCancel` (restore) | `getThemeParams()` (no slug — use global for restore) |
 
 ---
 
-### Step 5: Delete `release.config.mjs`
+## Implementation order
 
-```bash
-rm release.config.mjs
-```
+Dependencies flow top-down — each task can be committed independently.
 
-**Verify:** `ls release.config.mjs` fails with "No such file."
+| Order | Task | Est. size | Depends on |
+|:--|:--|:--|:--|
+| 1 | Preview cleanup (#1) | S | — |
+| 2 | Reset to defaults (#3) | S | — |
+| 3 | Status bar params summary (#2) | S | — |
+| 4 | Types — palette source + resolver (#4a) | S | — |
+| 5 | Theme gen — use palette mapping (#4b) | S | #4a |
+| 6 | Extended color swatches (#4c) | M | — |
+| 7 | Palette role mapping settings UI (#4d) | M | #4a, #4b |
+| 8 | Scoped settings types + resolution (#4e) | M | #4a |
+| 9 | Scope toggle UI (#4f) | L | #4e, #4c |
+| 10 | Callers — pass theme slug (#4g) | S | #4e |
 
----
-
-### Step 6: Create `.github/workflows/ci.yml`
-
-Create the file with this exact content:
-
-```yaml
-name: CI
-
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-
-permissions:
-  contents: read
-
-jobs:
-  validate:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Compute commitlint range
-        id: range
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            FROM="${{ github.event.pull_request.base.sha }}"
-            TO="${{ github.event.pull_request.head.sha }}"
-          else
-            FROM="${{ github.event.before }}"
-            TO="${{ github.sha }}"
-            if [ "$FROM" = "0000000000000000000000000000000000000000" ]; then
-              FROM=$(git rev-list --max-parents=0 HEAD | tail -n 1)
-            fi
-          fi
-          echo "from=$FROM" >> "$GITHUB_OUTPUT"
-          echo "to=$TO" >> "$GITHUB_OUTPUT"
-
-      - name: Lint commit messages
-        run: bunx commitlint --from "${{ steps.range.outputs.from }}" --to "${{ steps.range.outputs.to }}" --verbose
-
-      - name: Type check
-        run: bun run typecheck
-
-      - name: Verify package contents
-        run: npm pack --dry-run
-```
-
-**Verify:** File exists at `.github/workflows/ci.yml`. YAML is valid (`cat` and inspect).
+Total: ~10 commits, each independently reviewable. One PR with a `minor` changeset (net-new user-facing settings surface).
 
 ---
 
-### Step 6b: Add `changeset status` to `ci.yml` (changeset enforcement)
+## Changeset
 
-Append the following step to the `validate` job in `ci.yml`, after "Verify package contents":
+This work adds net-new user-facing features (palette role mapping, scoped settings, reset) → `minor` changeset.
 
-```yaml
-      - name: Require changeset
-        if: github.event_name == 'pull_request' && !startsWith(github.head_ref, 'changeset-release/')
-        run: bunx changeset status --since=origin/main
-```
+However: the settings panel itself already shipped. Adding settings to an existing command is `patch` per AGENTS.md. The scoped settings and palette role mapping do introduce new conceptual surface.
 
-This step:
-- Runs **only on PRs** (not on push to main).
-- **Skips the auto-maintained "Version Packages" PR** (branch `changeset-release/main`).
-- Fails if package files changed without a `.changeset/*.md` file.
-- PRs that intentionally skip a release use `bunx changeset --empty` to satisfy the check.
-
-**Verify:** The step is present in `ci.yml` after the pack step. The `if` condition references `changeset-release/`.
+**Decision:** Use `patch` for the initial commits (cleanup, reset, swatches). Evaluate `minor` vs `patch` for palette role mapping + scoped settings when those land — if users must learn new concepts to use the panel, that tips toward `minor`.
 
 ---
 
-### Step 7: Replace `.github/workflows/publish.yml` with `release.yml`
+## Verification gate
 
-Delete `publish.yml` and create `release.yml`:
-
-```bash
-rm .github/workflows/publish.yml
-```
-
-Create `.github/workflows/release.yml` with this exact content:
-
-```yaml
-name: Release
-
-on:
-  push:
-    branches: [main]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
-
-permissions:
-  contents: read
-
-jobs:
-  release:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-      id-token: write
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v6
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: lts/*
-          registry-url: https://registry.npmjs.org
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Upgrade npm for OIDC trusted publishing
-        run: npm install -g npm@latest
-
-      - name: Create release PR or publish
-        uses: changesets/action@v1
-        with:
-          version: bunx changeset version
-          publish: bunx changeset publish
-          commit: "chore(release): version packages"
-          title: "chore(release): version packages"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ""
-```
-
-**Verify:** `publish.yml` is gone. `release.yml` exists with content above. YAML is valid.
-
-**Note — npm trusted publisher update required after merge:** The existing `publish.yml` is registered in npmjs.com trusted publisher settings. After this PR merges, update the trusted publisher config at `https://www.npmjs.com/package/pi-cmux-theme-picker` → Settings → Trusted Publishers: change the workflow filename from `publish.yml` to `release.yml`. Publishing will fail until this is done. See Step 13 for the full post-merge checklist.
-
----
-
-### Step 8: Update decision records
-
-**`docs/decisions/DR-01-changesets-migration.md`:** Change the first line after the title from `**Status:** planned` to `**Status:** implemented`.
-
-**`docs/decisions/DR-02-force-bump-rules.md`:** Change:
-- `**Status:** planned (blocked by [DR-01](DR-01-changesets-migration.md))` → `**Status:** superseded by [DR-01](DR-01-changesets-migration.md)`
-- `**Priority:** next` → remove this line entirely
-
-Add a section at the end before any existing `## References`:
-
-```markdown
-## Resolution
-
-Superseded by DR-01. With changesets, any change that needs a release gets a changeset file with an explicit bump type — regardless of commit type. The semantic-release `releaseRules` approach described above was never implemented.
-```
-
-**Verify:** `grep "Status:" docs/decisions/DR-01*.md` shows `implemented`. `grep "Status:" docs/decisions/DR-02*.md` shows `superseded`.
-
----
-
-### Step 9: Update ROADMAP.md
-
-Replace the `## Next` section items with:
-
-```markdown
-## Next
-
-- [x] **Migrate to changesets** — replaced semantic-release with `@changesets/cli`. See [DR-01](docs/decisions/DR-01-changesets-migration.md). ✔
-- [x] ~~**Force-bump rules**~~ — superseded by changesets (explicit changeset files replace commit-type rules). See [DR-02](docs/decisions/DR-02-force-bump-rules.md).
-- [ ] **Branch protection** — require PRs to `main`, no direct push. Configure via GitHub rulesets (`gh api`). Pairs with changesets model.
-```
-
-**Verify:** `grep -c "\[x\]" ROADMAP.md` returns 2. The branch protection item remains unchecked.
-
----
-
-### Step 10: Update AGENTS.md
-
-Replace the `## What matters most` section with:
-
-````markdown
-## What matters most
-
-This is a published npm package with changesets-gated releases. Merging to `main` does not publish automatically — only merging the auto-maintained "Version Packages" PR triggers an npm publish. Treat `main` as a release branch.
-````
-
-Replace the `## Commit discipline` section (from `## Commit discipline` up to but not including the next `##` heading) with:
-
-````markdown
-## Commit discipline
-
-- Small, logical commits — one change per commit.
-- Conventional Commits are mandatory (enforced by lefthook + CI commitlint).
-- PRs that affect the published package must include a changeset file (`bunx changeset`).
-- The changeset file specifies the bump type (`patch`, `minor`, `major`) and a human-readable description.
-
-**Before merging a PR with a changeset, confirm the bump type:**
-
-| Changeset type | Version bump | Example |
-|:---|:---|:---|
-| `patch` | 0.3.0 → 0.3.1 | bug fix, UX correction, behavioral adjustment |
-| `minor` | 0.3.0 → 0.4.0 | net-new user-facing command, new API surface |
-| `major` | 0.3.0 → 1.0.0 | removed command, renamed parameter, broken import |
-
-**DO:** use `patch` for improvements, corrections, and UX refinements to existing features.
-
-**DO NOT:** use `minor` for changes to a feature that already shipped. Adding a setting to an existing command is `patch`, not `minor`.
-````
-
-Replace the `### Release pipeline` section (from `### Release pipeline` up to but not including the next `###` heading) with:
-
-````markdown
-### Release pipeline
-
-- `@changesets/cli` manages versioning. PRs that affect the published package include a changeset file (`.changeset/*.md`).
-- The changesets GitHub Action (`.github/workflows/release.yml`) maintains a "Version Packages" PR that accumulates pending changesets.
-- Merging the "Version Packages" PR bumps `package.json`, updates `CHANGELOG.md`, deletes changeset files, and publishes to npm.
-- Uses OIDC trusted publishing — no `NPM_TOKEN`, no `NODE_AUTH_TOKEN` in the workflow.
-- Provenance is generated automatically in CI (`publishConfig.provenance: true`). Local `npm publish` requires `--provenance=false`.
-- PRs without changeset files do not trigger releases (docs, refactors, chores are invisible to versioning).
-- To force a release for a non-code change (e.g. README update visible on npm), add a `patch` changeset.
-
-DO NOT add `NPM_TOKEN` or `NODE_AUTH_TOKEN` to the workflow — it would break OIDC trust.
-````
-
-Add a new `## Pre-push changeset gate` section after `## Commit discipline` and before the architecture constraints:
-
-````markdown
-## Pre-push changeset gate
-
-Before every push, check whether a changeset is required. This is the bridge between conventional commits and changesets — enforced by the lefthook `changeset-gate` hook and reinforced here as agent guidance.
-
-**Release rule (derived from conventional commit types in the push):**
-
-| Commit types present | Changeset required? | Minimum bump |
-|:---------------------|:--------------------|:-------------|
-| Only `chore:` `docs:` `refactor:` `test:` `ci:` `style:` | No | — |
-| Any `fix:` `perf:` `revert:` | Yes | `patch` |
-| Any `feat:` | Yes | `minor` |
-| Any `feat!:` or `BREAKING CHANGE:` footer | Yes | `major` |
-
-**If a changeset is required and none exists:**
-
-1. Run `bunx changeset` — select the correct bump type and write a short consumer-facing summary.
-2. `git add .changeset/ && git commit -m "chore: add changeset for <description>"`
-
-**If the push intentionally should not release** (releasable commits but release not wanted):
-
-Run `bunx changeset --empty` — creates an empty changeset that satisfies both the hook and CI without triggering a version bump.
-
-**Blocking message emitted by the hook:**
-
-```
-STOP — changeset required.
-
-Commits in this push include release-implying types: <types>
-Minimum bump implied: <patch|minor|major>
-No .changeset/*.md file found.
-```
-
-CI also enforces this via `changeset status --since=origin/main` on PRs.
-````
-
-Update the `## Orient quickly` file listing — replace the lines referencing `release.config.mjs` and `publish.yml` with:
-
-```
-.changeset/                            — changeset config + pending changeset files
-lefthook.yml                           — commit-msg: commitlint · pre-push: lockfile + typecheck + changeset-gate
-.github/workflows/ci.yml               — PR validation: commitlint, typecheck, changeset status
-.github/workflows/release.yml          — changesets action: Version Packages PR + npm publish (OIDC)
-```
-
-**Verify:**
-- `grep "semantic-release" AGENTS.md` returns no matches.
-- `grep "changesets" AGENTS.md` returns matches.
-- `grep "Pre-push changeset gate" AGENTS.md` returns a match.
-- `grep "changeset-gate" AGENTS.md` returns a match.
-
----
-
-### Step 10b: Add empty changeset for this PR
-
-This migration PR has no releasable commits (`chore:` only), but `changeset status` in CI will check for it. To be explicit:
-
-```bash
-bunx changeset --empty
-git add .changeset/
-```
-
-This creates an empty changeset file (no packages, no bump) that satisfies the CI gate.
-
-**Verify:** A new `.changeset/*.md` file exists with empty frontmatter (`---\n---`).
-
----
-
-### Step 11: Typecheck
+Before every commit:
 
 ```bash
 bun run typecheck
 ```
 
-**Verify:** Exit code 0. No errors. This project has no source code changes, but typecheck must still pass to confirm nothing broke.
+After the full set lands, manual verification:
 
----
-
-### Step 12: Commit
-
-Stage all changes and commit:
-
-```bash
-git add -A
-git commit -m "chore: migrate from semantic-release to changesets
-
-- Replace semantic-release with @changesets/cli + @changesets/changelog-github
-- Split single publish.yml into ci.yml (validation) and release.yml (changesets action)
-- Keep OIDC trusted publishing (no NPM_TOKEN)
-- Keep lefthook hooks (commitlint, lockfile sync, typecheck)
-- Delete release.config.mjs
-- Update DR-01 status to implemented, DR-02 to superseded
-- Update ROADMAP.md, AGENTS.md for new release workflow
-
-No changeset file included — this PR does not trigger an npm release.
-
-Refs: DR-01, DR-02"
-```
-
-**Verify:** `git log --oneline -1` shows the commit. `git diff --cached` is empty (everything committed).
-
----
-
-### Step 13: Push and open PR
-
-```bash
-git push -u origin chore/changesets-migration
-```
-
-Then open the PR:
-
-```bash
-gh pr create \
-  --base main \
-  --head chore/changesets-migration \
-  --title "chore: migrate from semantic-release to changesets" \
-  --body "## Summary
-
-Replaces semantic-release with @changesets/cli for batched, PR-gated npm releases.
-
-## What changed
-
-- **Removed:** semantic-release + 4 plugins, release.config.mjs
-- **Added:** @changesets/cli, @changesets/changelog-github, .changeset/ config
-- **Workflows:** split into ci.yml (validation) + release.yml (changesets action)
-- **Kept:** OIDC trusted publishing, lefthook hooks, commitlint, provenance
-
-## How releases work now
-
-1. PRs that affect the package include a changeset file (\`bunx changeset\`)
-2. Changesets action maintains a \"Version Packages\" PR accumulating pending changesets
-3. Merging that PR bumps version, updates CHANGELOG.md, publishes to npm
-4. PRs without changesets (like this one) do not trigger releases
-
-## Decision records
-
-- [DR-01: Changesets migration](docs/decisions/DR-01-changesets-migration.md) — implemented
-- [DR-02: Force-bump rules](docs/decisions/DR-02-force-bump-rules.md) — superseded by DR-01
-
-## Verification
-
-- [ ] \`bun run typecheck\` passes
-- [ ] No changeset file present (no release on merge)
-- [ ] CI workflow runs on this PR
-- [ ] After merge: push a test commit to main → release.yml should create a \"Version Packages\" PR (empty, since no changesets exist yet)
-"
-```
-
-**Verify:** `gh pr view --json url` returns the PR URL. PR is open against `main`.
-
----
-
-## Post-merge verification (manual, not part of this branch)
-
-After the PR is merged to `main`:
-
-1. **Update npm trusted publisher** — go to `https://www.npmjs.com/package/pi-cmux-theme-picker` → Settings → Trusted Publishers. Change workflow filename from `publish.yml` to `release.yml`. This must be done before any changeset-triggered publish attempt or publishing will fail with an OIDC trust error.
-2. Check that `ci.yml` runs and passes on the merge commit.
-3. Check that `release.yml` runs — it should detect no pending changesets and do nothing (no "Version Packages" PR created yet).
-4. To test the full flow later: create a branch, make a change, run `bunx changeset`, open a PR, merge it, and verify the "Version Packages" PR appears.
-5. When the "Version Packages" PR is eventually merged, verify publish succeeds with OIDC (no `NPM_TOKEN`).
-
----
-
-## Rollback
-
-If anything breaks after merge: revert the merge commit on `main`. Re-add semantic-release deps and `release.config.mjs` from git history. The old `publish.yml` is recoverable from the commit before the merge.
+1. `/theme` → pick a theme → cancel → verify no `cmux-preview-*` files remain
+2. `/theme` → pick a theme → confirm → verify no `cmux-preview-*` files remain
+3. `/theme-settings` → verify swatches render for all color and blend settings
+4. `/theme-settings` → cycle palette source for error → verify swatch updates
+5. `/theme-settings` → press `Tab` → scope switches to per-theme → verify header updates
+6. `/theme-settings` → change a value in per-theme scope → verify `*` marker appears
+7. `/theme-settings` → press `d` on overridden value → verify it reverts to global
+8. `/theme-settings` → press `r` → verify all params reset
+9. Status bar → apply a theme with non-default params → verify compact summary appears
