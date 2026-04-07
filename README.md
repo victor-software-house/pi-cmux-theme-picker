@@ -2,6 +2,8 @@
 
 Live [cmux](https://cmux.dev) terminal theme picker for [Pi](https://pi.dev). Synchronises Pi and cmux themes with debounced preview.
 
+![pi-cmux-theme-picker preview](assets/preview.png)
+
 ## What it does
 
 - **Session start sync** — reads the active cmux theme and generates a matching Pi theme automatically.

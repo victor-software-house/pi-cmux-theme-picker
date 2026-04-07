@@ -24,11 +24,13 @@
   "pi": {
     "extensions": [
       "./extensions"
-    ]
+    ],
+    "image": "https://raw.githubusercontent.com/victor-software-house/pi-cmux-theme-picker/main/assets/preview.png"
   },
   "type": "module",
   "files": [
     "extensions",
+    "assets/**",
     "README.md",
     "LICENSE"
   ],
