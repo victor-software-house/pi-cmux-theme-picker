@@ -17,7 +17,7 @@ import {
 	buildThemeInstance,
 } from "./pi-theme.js";
 import { showThemePicker } from "./picker.js";
-import { getSettings, updateSettings, updateThemeParamInMemory, persistSettings, getThemeParams, getPreviewDebounceMs, loadSettings } from "./settings.js";
+import { getSettings, updateSettings, updateThemeParamInMemory, persistSettings, getThemeParams, getPreviewDebounceMs, loadSettings, resetThemeParams } from "./settings.js";
 import { DEFAULT_THEME_PARAMS, type SessionContext, type ThemeParams } from "./types.js";
 import { debounce } from "perfect-debounce";
 
@@ -212,6 +212,12 @@ export default function (pi: ExtensionAPI) {
 			let items: SettingItem[] = [];
 			let settingsList: SettingsList | null = null;
 
+			const refreshItems = (): void => {
+				items = buildItems();
+				if (selectedIdx >= items.length) selectedIdx = Math.max(0, items.length - 1);
+				for (const item of items) settingsList?.updateValue(item.id, item.currentValue);
+			};
+
 			const cycleSelected = (direction: number): void => {
 				const item = items[selectedIdx];
 				if (!item?.values || item.values.length === 0) return;
@@ -226,7 +232,7 @@ export default function (pi: ExtensionAPI) {
 			await ctx.ui.custom((tui, _theme, _kb, done) => {
 				const t = () => ctx.ui.theme;
 				const container = new Container();
-				items = buildItems();
+				refreshItems();
 
 				// Use live theme callbacks — same pattern as the picker
 				settingsList = new SettingsList(
@@ -257,7 +263,7 @@ export default function (pi: ExtensionAPI) {
 
 				container.addChild(new Text(t().fg("accent", t().bold(" Theme Generation Settings")), 1, 0));
 				container.addChild(settingsList);
-				container.addChild(new Text(t().fg("dim", " \u2190\u2192 adjust \u00B7 enter/space cycle \u00B7 esc close"), 1, 0));
+				container.addChild(new Text(t().fg("dim", " \u2190\u2192 adjust \u00B7 enter/space cycle \u00B7 r reset \u00B7 esc close"), 1, 0));
 
 				return {
 					render: (w) => container.render(w),
@@ -273,6 +279,12 @@ export default function (pi: ExtensionAPI) {
 							return;
 						} else if (matchesKey(data, Key.left)) {
 							cycleSelected(-1);
+							tui.requestRender();
+							return;
+						} else if (data.toLowerCase() === "r") {
+							resetThemeParams();
+							refreshItems();
+							applyPreview();
 							tui.requestRender();
 							return;
 						}

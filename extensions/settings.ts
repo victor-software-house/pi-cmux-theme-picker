@@ -95,6 +95,12 @@ export function updateThemeParamInMemory<K extends keyof ThemeParams>(key: K, va
 	current.themeParams[key] = value;
 }
 
+/** Reset theme params to defaults and persist to global config. */
+export function resetThemeParams(): void {
+	current.themeParams = { ...DEFAULT_THEME_PARAMS };
+	writeConfigFile(globalConfigPath(), current);
+}
+
 /** Persist current in-memory settings to global config. */
 export function persistSettings(): void {
 	writeConfigFile(globalConfigPath(), current);
