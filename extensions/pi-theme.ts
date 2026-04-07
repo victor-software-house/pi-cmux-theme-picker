@@ -185,16 +185,22 @@ export function writeAndSetPiTheme(ctx: SessionContext, colors: CmuxColors, sour
 	const themeFile = `${themeName}.json`;
 	const themePath = join(PI_THEMES_DIR, themeFile);
 
+	// Set theme by name FIRST — this starts Pi's file watcher on the theme file.
+	// Then write to disk — the watcher detects the change, re-reads the file,
+	// updates registeredThemes, calls setGlobalTheme, and triggers a render.
+	// 100ms watcher debounce is Pi's own mechanism for live theme reloading.
+	const result = ctx.ui.setTheme(themeName);
+	if (!result.success) {
+		// File doesn't exist yet — write first, then set
+		const themeJson = generatePiTheme(colors, themeName, p);
+		writeFileSync(themePath, JSON.stringify(themeJson, null, 2));
+		cleanupOldSyncThemes([themeFile]);
+		ctx.ui.setTheme(themeName);
+		return themeName;
+	}
 	const themeJson = generatePiTheme(colors, themeName, p);
 	writeFileSync(themePath, JSON.stringify(themeJson, null, 2));
 	cleanupOldSyncThemes([themeFile]);
-
-	// Use setTheme(instance) to bypass Pi's registeredThemes cache.
-	// setTheme(name) would return a stale cached instance if this theme
-	// was previously loaded under the same name. The instance path
-	// (setThemeInstance internally) always applies what we just built.
-	const instance = buildThemeInstance(colors, themeName, p, ctx);
-	ctx.ui.setTheme(instance);
 	return themeName;
 }
 
