@@ -130,7 +130,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -204,7 +204,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
@@ -218,6 +218,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Upgrade npm for OIDC trusted publishing
+        run: npm install -g npm@latest
+
       - name: Create release PR or publish
         uses: changesets/action@v1
         with:
@@ -227,9 +230,12 @@ jobs:
           title: "chore(release): version packages"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_TOKEN: ""
 ```
 
 **Verify:** `publish.yml` is gone. `release.yml` exists with content above. YAML is valid.
+
+**Note — npm trusted publisher update required after merge:** The existing `publish.yml` is registered in npmjs.com trusted publisher settings. After this PR merges, update the trusted publisher config at `https://www.npmjs.com/package/pi-cmux-theme-picker` → Settings → Trusted Publishers: change the workflow filename from `publish.yml` to `release.yml`. Publishing will fail until this is done. See Step 13 for the full post-merge checklist.
 
 ---
 
@@ -403,9 +409,11 @@ Replaces semantic-release with @changesets/cli for batched, PR-gated npm release
 
 After the PR is merged to `main`:
 
-1. Check that `ci.yml` runs and passes on the merge commit.
-2. Check that `release.yml` runs — it should detect no pending changesets and do nothing (no "Version Packages" PR created yet).
-3. To test the full flow later: create a branch, make a change, run `bunx changeset`, open a PR, merge it, and verify the "Version Packages" PR appears.
+1. **Update npm trusted publisher** — go to `https://www.npmjs.com/package/pi-cmux-theme-picker` → Settings → Trusted Publishers. Change workflow filename from `publish.yml` to `release.yml`. This must be done before any changeset-triggered publish attempt or publishing will fail with an OIDC trust error.
+2. Check that `ci.yml` runs and passes on the merge commit.
+3. Check that `release.yml` runs — it should detect no pending changesets and do nothing (no "Version Packages" PR created yet).
+4. To test the full flow later: create a branch, make a change, run `bunx changeset`, open a PR, merge it, and verify the "Version Packages" PR appears.
+5. When the "Version Packages" PR is eventually merged, verify publish succeeds with OIDC (no `NPM_TOKEN`).
 
 ---
 
