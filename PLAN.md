@@ -259,6 +259,109 @@ jobs:
 
 ---
 
+### Step 7b: Add `changeset-gate` to `lefthook.yml`
+
+Add a `changeset-gate` command to the `pre-push` section of `lefthook.yml`, after the existing `typecheck` command:
+
+```yaml
+    changeset-gate:
+      run: |
+        BASE=$(git merge-base origin/main HEAD 2>/dev/null) || exit 0
+        COMMITS=$(git log --format="%s%n%b" "${BASE}..HEAD" 2>/dev/null)
+        [ -z "$COMMITS" ] && exit 0
+
+        TYPES=$(echo "$COMMITS" | grep -oE '^(feat|fix|perf|revert)(\([^)]+\))?!?:' \
+          | grep -oE '^[a-z]+' | sort -u | tr '\n' ' ')
+        HAS_BREAKING=$(echo "$COMMITS" \
+          | grep -cE '(BREAKING[- ]CHANGE|^[a-z]+(\([^)]+\))?!:)' || echo 0)
+
+        [ -z "$TYPES" ] && [ "$HAS_BREAKING" -eq 0 ] && exit 0
+
+        CHANGESETS=$(find .changeset -name "*.md" \
+          ! -name "README.md" ! -name "config.json" 2>/dev/null \
+          | wc -l | tr -d ' ')
+        [ "$CHANGESETS" -gt 0 ] && exit 0
+
+        BUMP="patch"
+        echo "$TYPES" | grep -q "feat" && BUMP="minor"
+        [ "$HAS_BREAKING" -gt 0 ] && BUMP="major"
+
+        echo ""
+        echo "STOP — changeset required."
+        echo ""
+        echo "Commits in this push include release-implying types: ${TYPES}"
+        echo "Minimum bump implied: ${BUMP}"
+        echo "No .changeset/*.md file found."
+        echo ""
+        echo "Action required:"
+        echo "  bunx changeset        # interactive — select bump type and write summary"
+        echo "  git add .changeset/"
+        echo "  git commit -m 'chore: add changeset for <short description>'"
+        echo ""
+        echo "If this push intentionally should NOT release, use:"
+        echo "  bunx changeset --empty"
+        echo "  git add .changeset/"
+        echo "  git commit -m 'chore: empty changeset — no release intended'"
+        echo ""
+        exit 1
+```
+
+The full `pre-push` section of `lefthook.yml` should look like:
+
+```yaml
+pre-push:
+  commands:
+    lockfile-sync:
+      run: bun install --frozen-lockfile
+    typecheck:
+      run: bun run typecheck
+    changeset-gate:
+      run: |
+        BASE=$(git merge-base origin/main HEAD 2>/dev/null) || exit 0
+        COMMITS=$(git log --format="%s%n%b" "${BASE}..HEAD" 2>/dev/null)
+        [ -z "$COMMITS" ] && exit 0
+
+        TYPES=$(echo "$COMMITS" | grep -oE '^(feat|fix|perf|revert)(\([^)]+\))?!?:' \
+          | grep -oE '^[a-z]+' | sort -u | tr '\n' ' ')
+        HAS_BREAKING=$(echo "$COMMITS" \
+          | grep -cE '(BREAKING[- ]CHANGE|^[a-z]+(\([^)]+\))?!:)' || echo 0)
+
+        [ -z "$COMMITS" ] && exit 0
+        [ -z "$TYPES" ] && [ "$HAS_BREAKING" -eq 0 ] && exit 0
+
+        CHANGESETS=$(find .changeset -name "*.md" \
+          ! -name "README.md" ! -name "config.json" 2>/dev/null \
+          | wc -l | tr -d ' ')
+        [ "$CHANGESETS" -gt 0 ] && exit 0
+
+        BUMP="patch"
+        echo "$TYPES" | grep -q "feat" && BUMP="minor"
+        [ "$HAS_BREAKING" -gt 0 ] && BUMP="major"
+
+        echo ""
+        echo "STOP — changeset required."
+        echo ""
+        echo "Commits in this push include release-implying types: ${TYPES}"
+        echo "Minimum bump implied: ${BUMP}"
+        echo "No .changeset/*.md file found."
+        echo ""
+        echo "Action required:"
+        echo "  bunx changeset        # interactive — select bump type and write summary"
+        echo "  git add .changeset/"
+        echo "  git commit -m 'chore: add changeset for <short description>'"
+        echo ""
+        echo "If this push intentionally should NOT release, use:"
+        echo "  bunx changeset --empty"
+        echo "  git add .changeset/"
+        echo "  git commit -m 'chore: empty changeset — no release intended'"
+        echo ""
+        exit 1
+```
+
+**Verify:** `grep "changeset-gate" lefthook.yml` returns a match. Push a test with a `fix:` commit and no changeset — gate must fire.
+
+---
+
 ### Step 8: Update decision records
 
 **`docs/decisions/DR-01-changesets-migration.md`:** Change the first line after the title from `**Status:** planned` to `**Status:** implemented`.
@@ -299,15 +402,15 @@ Replace the `## Next` section items with:
 
 Replace the `## What matters most` section with:
 
-```markdown
+````markdown
 ## What matters most
 
 This is a published npm package with changesets-gated releases. Merging to `main` does not publish automatically — only merging the auto-maintained "Version Packages" PR triggers an npm publish. Treat `main` as a release branch.
-```
+````
 
 Replace the `## Commit discipline` section (from `## Commit discipline` up to but not including the next `##` heading) with:
 
-```markdown
+````markdown
 ## Commit discipline
 
 - Small, logical commits — one change per commit.
@@ -326,11 +429,11 @@ Replace the `## Commit discipline` section (from `## Commit discipline` up to bu
 **DO:** use `patch` for improvements, corrections, and UX refinements to existing features.
 
 **DO NOT:** use `minor` for changes to a feature that already shipped. Adding a setting to an existing command is `patch`, not `minor`.
-```
+````
 
 Replace the `### Release pipeline` section (from `### Release pipeline` up to but not including the next `###` heading) with:
 
-```markdown
+````markdown
 ### Release pipeline
 
 - `@changesets/cli` manages versioning. PRs that affect the published package include a changeset file (`.changeset/*.md`).
@@ -342,20 +445,16 @@ Replace the `### Release pipeline` section (from `### Release pipeline` up to bu
 - To force a release for a non-code change (e.g. README update visible on npm), add a `patch` changeset.
 
 DO NOT add `NPM_TOKEN` or `NODE_AUTH_TOKEN` to the workflow — it would break OIDC trust.
-```
+````
 
-Add a new section after `## Commit discipline` and before `## Release pipeline` (or wherever architecture constraints start):
+Add a new `## Pre-push changeset gate` section after `## Commit discipline` and before the architecture constraints:
 
-```markdown
+````markdown
 ## Pre-push changeset gate
 
-Before every push, check whether a changeset is required. This is the bridge between conventional commits and changesets — enforced by agent discipline, not CI alone.
+Before every push, check whether a changeset is required. This is the bridge between conventional commits and changesets — enforced by the lefthook `changeset-gate` hook and reinforced here as agent guidance.
 
-**Decision procedure (run mentally before every push):**
-
-1. List commits being pushed: `git log --oneline origin/main..HEAD`
-2. Classify each commit type from its conventional commit prefix.
-3. Apply the release rule:
+**Release rule (derived from conventional commit types in the push):**
 
 | Commit types present | Changeset required? | Minimum bump |
 |:---------------------|:--------------------|:-------------|
@@ -364,50 +463,42 @@ Before every push, check whether a changeset is required. This is the bridge bet
 | Any `feat:` | Yes | `minor` |
 | Any `feat!:` or `BREAKING CHANGE:` footer | Yes | `major` |
 
-4. If a changeset is required and none exists in `.changeset/`:
-   - Stop. Run `bunx changeset` and select the correct bump type.
-   - The changeset summary must be a short, factual description of what changed for the package consumer.
-   - Commit the changeset file before pushing.
-5. If no changeset is required but one exists, that is allowed (deliberate release of non-code changes).
-6. If the PR intentionally has releasable commits but should not trigger a release, use `bunx changeset --empty` and commit it.
+**If a changeset is required and none exists:**
 
-**Blocking message (if changeset is missing):**
+1. Run `bunx changeset` — select the correct bump type and write a short consumer-facing summary.
+2. `git add .changeset/ && git commit -m "chore: add changeset for <description>"`
+
+**If the push intentionally should not release** (releasable commits but release not wanted):
+
+Run `bunx changeset --empty` — creates an empty changeset that satisfies both the hook and CI without triggering a version bump.
+
+**Blocking message emitted by the hook:**
 
 ```
 STOP — changeset required.
 
-Commits in this push include release-implying types: <list types found>
+Commits in this push include release-implying types: <types>
 Minimum bump implied: <patch|minor|major>
 No .changeset/*.md file found.
-
-Action required:
-  bunx changeset        # interactive — select bump type and write summary
-  git add .changeset/
-  git commit -m "chore: add changeset for <short description>"
-
-If this push intentionally should NOT release, use:
-  bunx changeset --empty
-  git add .changeset/
-  git commit -m "chore: empty changeset — no release intended"
 ```
 
-CI also enforces this via `changeset status --since=origin/main` on PRs, but the agent gate catches it earlier.
-```
+CI also enforces this via `changeset status --since=origin/main` on PRs.
+````
 
-Update the `## Orient quickly` section to reflect the new file structure — replace lines referencing `release.config.mjs` and `publish.yml`:
+Update the `## Orient quickly` file listing — replace the lines referencing `release.config.mjs` and `publish.yml` with:
 
 ```
-.changeset/           — changeset config + pending changeset files
-lefthook.yml          — commit-msg: commitlint · pre-push: bun lockfile sync + typecheck
-.github/workflows/ci.yml      — PR validation: commitlint, typecheck, changeset status
-.github/workflows/release.yml — changesets action: Version Packages PR + npm publish (OIDC)
+.changeset/                            — changeset config + pending changeset files
+lefthook.yml                           — commit-msg: commitlint · pre-push: lockfile + typecheck + changeset-gate
+.github/workflows/ci.yml               — PR validation: commitlint, typecheck, changeset status
+.github/workflows/release.yml          — changesets action: Version Packages PR + npm publish (OIDC)
 ```
 
 **Verify:**
 - `grep "semantic-release" AGENTS.md` returns no matches.
 - `grep "changesets" AGENTS.md` returns matches.
 - `grep "Pre-push changeset gate" AGENTS.md` returns a match.
-- `grep "STOP" AGENTS.md` returns the blocking message.
+- `grep "changeset-gate" AGENTS.md` returns a match.
 
 ---
 
