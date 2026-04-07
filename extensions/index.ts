@@ -310,7 +310,6 @@ export default function (pi: ExtensionAPI) {
 				};
 
 				const headerText = new Text("", 1, 0);
-				const hintText = new Text(t().fg("dim", " \u2190\u2192 adjust \u00B7 enter/space cycle \u00B7 tab scope \u00B7 d clear override \u00B7 r reset \u00B7 esc close"), 1, 0);
 
 				// Full rebuild — recreates SettingsList so swatch labels always reflect current values.
 				const rebuild = (): void => {
@@ -333,7 +332,6 @@ export default function (pi: ExtensionAPI) {
 					container.clear();
 					container.addChild(headerText);
 					container.addChild(settingsList);
-					container.addChild(hintText);
 				};
 
 				const cycleSelected = (direction: number): void => {
