@@ -7,7 +7,7 @@
  */
 
 import { getMarkdownTheme, type ExtensionAPI, type ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { Box, Container, Key, Markdown, type AutocompleteItem, type Component, type OverlayHandle, type SettingItem, SettingsList, Spacer, Text, matchesKey } from "@mariozechner/pi-tui";
+import { Container, Key, Markdown, type AutocompleteItem, type Component, type OverlayHandle, type SettingItem, SettingsList, Spacer, Text, Box, matchesKey } from "@mariozechner/pi-tui";
 import { getCurrentCmuxThemeName, getCmuxThemeColors, getAvailableCmuxThemes, runCmuxThemeSet } from "./cmux.js";
 import { ensureSemanticHue, hexToRgb, mixColors } from "./colors.js";
 import {
@@ -116,15 +116,40 @@ function numRange(min: number, max: number, step: number, decimals: number): str
 
 // --- Theme preview overlay ---
 
+// Lazy-loaded ToolExecutionComponent — lives in Pi's internal renderer.
+let _tec: { cls: any; defs: Record<string, any> } | null = null;
+function getTEC(): typeof _tec {
+	if (!_tec) {
+		try {
+			const base = require.resolve("@mariozechner/pi-coding-agent").replace(/dist\/index\.js$/, "dist/");
+			const tecMod = require(`${base}modes/interactive/components/tool-execution.js`);
+			const toolsMod = require(`${base}core/tools/index.js`);
+			_tec = { cls: tecMod.ToolExecutionComponent, defs: toolsMod.allToolDefinitions };
+		} catch { /* graceful fallback */ }
+	}
+	return _tec;
+}
+
+function createToolPreview(name: string, args: Record<string, unknown>, result: { content: { type: string; text: string }[]; details?: string; isError: boolean }): Component | null {
+	const tec = getTEC();
+	if (!tec) return null;
+	const mockUi = { requestRender: () => {} };
+	const comp = new tec.cls(name, `preview-${name}`, args, { showImages: false }, tec.defs[name], mockUi, process.cwd());
+	comp.setArgsComplete();
+	comp.markExecutionStarted();
+	comp.updateResult(result);
+	return comp as Component;
+}
+
 /**
- * Non-capturing overlay that simulates Pi conversation UI using native components.
- * Uses Box (full-width bg), Markdown (styled text), Text, Spacer — same as
- * tool-execution.js and user-message.js in Pi's renderer.
+ * Non-capturing overlay that previews theme colors using Pi's actual renderers.
+ * ToolExecutionComponent renders tool calls identically to real Pi output
+ * (syntax highlighting, diff rendering, backgrounds, timing).
+ * Markdown handles user/assistant/custom messages. Box handles selected highlight.
  */
 class ThemePreview implements Component {
 	private container = new Container();
 
-	/** Rebuild all children using the live theme (ctx.ui.theme proxy). */
 	// biome-ignore lint: Theme proxy has typed keys but we use string-based lookups
 	rebuild(t: () => any): void {
 		const theme = t();
@@ -148,41 +173,28 @@ class ThemePreview implements Component {
 			1, 0, getMarkdownTheme(),
 		));
 
-		// --- Tool call: success ---
-		this.container.addChild(new Spacer(1));
-		const successBox = new Box(1, 1, (text: string) => theme.bg("toolSuccessBg", text));
-		successBox.addChild(new Text(
-			theme.fg("toolTitle", theme.bold("\u2714 Read")) + " " + theme.fg("toolOutput", "src/login.ts"),
-			0, 0,
-		));
-		successBox.addChild(new Text(
-			theme.fg("toolDiffAdded", "+") + theme.fg("text", "   validateToken(user.token);") + "\n" +
-			theme.fg("toolDiffRemoved", "-") + theme.fg("text", "   // missing validation"),
-			0, 0,
-		));
-		this.container.addChild(successBox);
+		// --- Tool calls using Pi's actual ToolExecutionComponent ---
+		const readTool = createToolPreview("read", { path: "src/login.ts" }, {
+			content: [{ type: "text", text: "export function login(user: string) {\n  validateToken(user.token);\n}" }],
+			details: "3 lines", isError: false,
+		});
+		if (readTool) this.container.addChild(readTool);
 
-		// --- Tool call: pending ---
-		this.container.addChild(new Spacer(1));
-		const pendingBox = new Box(1, 1, (text: string) => theme.bg("toolPendingBg", text));
-		pendingBox.addChild(new Text(
-			theme.fg("toolTitle", theme.bold("\u2026 Edit")) + " " + theme.fg("toolOutput", "src/login.ts"),
-			0, 0,
-		));
-		this.container.addChild(pendingBox);
+		const editTool = createToolPreview("edit", {
+			path: "src/login.ts",
+			edits: [{ oldText: "// missing", newText: "validateToken(user.token);" }],
+		}, {
+			content: [{ type: "text", text: "1 edit applied" }],
+			details: "--- src/login.ts\n+++ src/login.ts\n@@ -1,3 +1,3 @@\n export function login(user) {\n-  // missing\n+  validateToken(user.token);\n }",
+			isError: false,
+		});
+		if (editTool) this.container.addChild(editTool);
 
-		// --- Tool call: error ---
-		this.container.addChild(new Spacer(1));
-		const errorBox = new Box(1, 1, (text: string) => theme.bg("toolErrorBg", text));
-		errorBox.addChild(new Text(
-			theme.fg("toolTitle", theme.bold("\u2718 Bash")) + " " + theme.fg("toolOutput", "npm test"),
-			0, 0,
-		));
-		errorBox.addChild(new Text(
-			theme.fg("error", "Error: ") + theme.fg("toolOutput", "test suite failed"),
-			0, 0,
-		));
-		this.container.addChild(errorBox);
+		const bashTool = createToolPreview("bash", { command: "npm test" }, {
+			content: [{ type: "text", text: "Error: test suite failed\n  at login.test.ts:15" }],
+			details: "exit 1 (2 lines)", isError: true,
+		});
+		if (bashTool) this.container.addChild(bashTool);
 
 		// --- Markdown summary ---
 		this.container.addChild(new Spacer(1));
@@ -346,12 +358,6 @@ export default function (pi: ExtensionAPI) {
 					{ id: "linkSource", label: `${overridePrefix("linkSource")}${sourceSwatch("linkSource", p.linkFallback)} Link source`, currentValue: p.linkSource, values: sourceValues, description: overrideDesc("linkSource", "Source color for link semantic role") },
 					{ id: "accentSource", label: `${overridePrefix("accentSource")}${sourceSwatch("accentSource", p.accentFallback)} Accent source`, currentValue: p.accentSource, values: sourceValues, description: overrideDesc("accentSource", "Source color for accent semantic role") },
 					{ id: "accentAltSource", label: `${overridePrefix("accentAltSource")}${sourceSwatch("accentAltSource", p.accentAltFallback)} Accent alt source`, currentValue: p.accentAltSource, values: sourceValues, description: overrideDesc("accentAltSource", "Source color for alternate accent role") },
-					{ id: "errorFallback", label: `${overridePrefix("errorFallback")}${swatch(p.errorFallback)} Error fallback`, currentValue: p.errorFallback, description: overrideDesc("errorFallback", "Fallback when chosen source hue is too far from red") },
-					{ id: "successFallback", label: `${overridePrefix("successFallback")}${swatch(p.successFallback)} Success fallback`, currentValue: p.successFallback, description: overrideDesc("successFallback", "Fallback when chosen source hue is too far from green") },
-					{ id: "warningFallback", label: `${overridePrefix("warningFallback")}${swatch(p.warningFallback)} Warning fallback`, currentValue: p.warningFallback, description: overrideDesc("warningFallback", "Fallback when chosen source hue is too far from yellow") },
-					{ id: "linkFallback", label: `${overridePrefix("linkFallback")}${swatch(p.linkFallback)} Link fallback`, currentValue: p.linkFallback, description: overrideDesc("linkFallback", "Fallback when chosen source hue is too far from blue") },
-					{ id: "accentFallback", label: `${overridePrefix("accentFallback")}${swatch(p.accentFallback)} Accent fallback`, currentValue: p.accentFallback, description: overrideDesc("accentFallback", "Used when selected accent source is missing") },
-					{ id: "accentAltFallback", label: `${overridePrefix("accentAltFallback")}${swatch(p.accentAltFallback)} Accent alt fallback`, currentValue: p.accentAltFallback, description: overrideDesc("accentAltFallback", "Used when selected accent alt source is missing") },
 					{ id: "linkContrastMin", label: `${overridePrefix("linkContrastMin")}Link contrast minimum`, currentValue: p.linkContrastMin.toFixed(1), values: contrastRange, description: overrideDesc("linkContrastMin", "Minimum contrast ratio for readable links (WCAG AA = 4.5)") },
 					{ id: "previewDebounceMs", label: "Preview debounce (ms)", currentValue: settings.previewDebounceMs.toFixed(0), values: numRange(50, 1000, 50, 0), description: "Cooldown before theme preview applies (lower = faster, higher = smoother navigation)" },
 				];
