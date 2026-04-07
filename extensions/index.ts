@@ -10,6 +10,9 @@ import { getMarkdownTheme, type ExtensionAPI, type ExtensionContext } from "@mar
 import { Container, Key, Markdown, type AutocompleteItem, type Component, type OverlayHandle, type SettingItem, SettingsList, Spacer, Text, Box, matchesKey } from "@mariozechner/pi-tui";
 import { getCurrentCmuxThemeName, getCmuxThemeColors, getAvailableCmuxThemes, runCmuxThemeSet } from "./cmux.js";
 import { ensureSemanticHue, hexToRgb, mixColors } from "./colors.js";
+import { writeFileSync, unlinkSync, mkdirSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import {
 	slugifyThemeName,
 	writeAndSetPiTheme,
@@ -211,54 +214,66 @@ class ThemePreview implements Component {
 		);
 
 		// --- User message ---
-		this.container.addChild(new Spacer(1));
-		this.container.addChild(new Markdown("> Fix the auth bug in login.ts", 1, 1, getMarkdownTheme(), {
+		this.container.addChild(new Markdown("> Fix the auth bug", 1, 1, getMarkdownTheme(), {
 			bgColor: (text: string) => theme.bg("userMessageBg", text),
 			color: (text: string) => theme.fg("userMessageText", text),
 		}));
 
 		// --- Assistant text ---
-		this.container.addChild(new Spacer(1));
 		this.container.addChild(new Markdown(
-			"I'll fix the **authentication** bug. Let me [read the file](src/login.ts).",
+			"I'll fix the **auth** bug. Let me [read](src/auth.ts) the file.",
 			1, 0, getMarkdownTheme(),
 		));
 
-		// --- Tool calls using Pi's actual ToolExecutionComponent + real execution ---
-		const readArgs = { path: "extensions/colors.ts", limit: 5 };
+		// --- Tool calls using Pi's actual tools against temp files ---
+		const previewDir = join(tmpdir(), "pi-theme-preview");
+		if (!existsSync(previewDir)) mkdirSync(previewDir, { recursive: true });
+		const sampleFile = join(previewDir, "auth.ts");
+		writeFileSync(sampleFile, [
+			'import { verify } from "./crypto";',
+			"",
+			"export async function login(user: string, token: string) {",
+			"  const valid = await verify(token);",
+			"  if (!valid) throw new Error(\"invalid token\");",
+			"  return { user, role: \"admin\" };",
+			"}",
+		].join("\n"));
+
+		const readArgs = { path: sampleFile, limit: 7 };
 		const readComp = createToolPreviewSync("read", readArgs);
 		if (readComp) this.container.addChild(readComp);
 
-		const bashArgs = { command: "echo 'theme preview test'" };
+		const editArgs = {
+			path: sampleFile,
+			edits: [{ oldText: '  const valid = await verify(token);', newText: '  const valid = await verify(token, "HS256");' }],
+		};
+		const editComp = createToolPreviewSync("edit", editArgs);
+		if (editComp) this.container.addChild(editComp);
+
+		const bashArgs = { command: "echo 'Tests passed: 3/3'" };
 		const bashComp = createToolPreviewSync("bash", bashArgs);
 		if (bashComp) this.container.addChild(bashComp);
 
 		// Execute tools async — components update in place when results arrive.
 		this._pendingExecutions = [];
 		if (readComp) this._pendingExecutions.push({ comp: readComp, name: "read", args: readArgs });
+		if (editComp) this._pendingExecutions.push({ comp: editComp, name: "edit", args: editArgs });
 		if (bashComp) this._pendingExecutions.push({ comp: bashComp, name: "bash", args: bashArgs });
 
-		// --- Markdown summary ---
-		this.container.addChild(new Spacer(1));
+		// --- Assistant markdown response ---
 		this.container.addChild(new Markdown(
-			"## Summary\n" +
-			"- Added `token validation`\n" +
-			"- Tests **failing** \u2014 needs fix",
+			"## Done\n" +
+			"- Added `\"HS256\"` algorithm param\n" +
+			"- All tests [passing](results.txt)\n\n" +
+			"> **Note:** review before merging",
 			1, 0, getMarkdownTheme(),
 		));
 
 		// --- Custom message ---
-		this.container.addChild(new Spacer(1));
-		this.container.addChild(new Markdown("Review before merging", 1, 1, getMarkdownTheme(), {
+		this.container.addChild(new Markdown("Waiting for approval", 1, 1, getMarkdownTheme(), {
 			bgColor: (text: string) => theme.bg("customMessageBg", text),
 			color: (text: string) => theme.fg("customMessageText", text),
 		}));
-
-		// --- Selected item ---
-		this.container.addChild(new Spacer(1));
-		const selectedBox = new Box(1, 0, (text: string) => theme.bg("selectedBg", text));
-		selectedBox.addChild(new Text("\u2192 Selected item highlight", 0, 0));
-		this.container.addChild(selectedBox);
 	}
 
 	invalidate(): void { this.container.invalidate(); }
@@ -519,9 +534,9 @@ export default function (pi: ExtensionAPI) {
 				const previewHandle = (tui as any).showOverlay(preview, {
 					nonCapturing: true,
 					anchor: "right-center",
-					width: "45%",
-					minWidth: 38,
-					margin: { right: 1, top: 1, bottom: 1 },
+					width: "55%",
+					minWidth: 44,
+					margin: { right: 1, top: 0, bottom: 0 },
 				}) as OverlayHandle;
 
 				beforeClose = () => previewHandle.hide();
