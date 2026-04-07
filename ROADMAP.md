@@ -13,7 +13,7 @@ Detailed decision records and implementation notes live in [`docs/decisions/`](d
 
 - [x] **Status bar params summary** — show current theme params when non-default (`17c0f2a`) ✔
 - [x] **Reset to defaults** — `r` key in `/theme-settings` resets params (`028dd63`) ✔
-- [ ] **Settings panel overhaul** — color swatches, palette role mapping, scoped settings (global vs per-theme). See [DR-03](docs/decisions/DR-03-settings-panel-ux.md).
+- [x] **Settings panel overhaul** — color swatches, palette role mapping, scoped settings (global vs per-theme). See [DR-03](docs/decisions/DR-03-settings-panel-ux.md). ✔
   - [x] Palette source types + resolver (`13b71d7`)
   - [x] Theme generation uses palette mapping (`13b71d7`)
   - [x] Color swatches in settings panel (`13b71d7`)
@@ -21,8 +21,8 @@ Detailed decision records and implementation notes live in [`docs/decisions/`](d
   - [x] Scoped settings model in `settings.ts` (`9b21c1d`)
   - [x] Scope toggle UI in `/theme-settings` (`4d0f69c`) ✔
   - [x] Pass theme slug to all `getThemeParams()` callers (`4d0f69c`) ✔
-  - [ ] Per-theme visual indicators (`* ` prefix implemented in dirty `index.ts`, `(overrides global)` description not yet)
-- [ ] **Dead code cleanup** — remove `writePreviewFile()`, `removePreviewThemeFiles()`, and `PREVIEW_THEME_PREFIX` (never called — previews are entirely in-memory). Revert the no-op cleanup calls added in `46d952a`.
+  - [x] Per-theme visual indicators — `* ` prefix + `(global: X)` description (`194a050`) ✔
+- [x] **Dead code cleanup** — removed `writePreviewFile()`, `removePreviewThemeFiles()`, `PREVIEW_THEME_PREFIX`, and `previewNameFor()` (`fd9833d`) ✔
 
 ## Future
 
