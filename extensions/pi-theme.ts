@@ -6,7 +6,6 @@
  */
 
 import { createHash } from "node:crypto";
-import { createRequire } from "node:module";
 import { existsSync, mkdirSync, readdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -174,46 +173,6 @@ export function generatePiTheme(colors: CmuxColors, themeName: string, p: ThemeP
 	};
 }
 
-// --- Pi internal theme cache invalidation ---
-// Pi's registeredThemes Map (private to theme.js) caches loaded Theme instances by name.
-// setTheme(name) returns the cached entry without re-reading disk, so stale params persist.
-// We reach setRegisteredThemes via CJS interop (same ESM module instance as Pi uses).
-function getThemeModule(): {
-	setRegisteredThemes: (themes: unknown[]) => void;
-	getAvailableThemesWithPaths: () => Array<{ name: string; path: string }>;
-	getThemeByName: (name: string) => unknown;
-	loadThemeFromPath: (path: string) => unknown;
-} {
-	const req = createRequire(import.meta.url);
-	return req(join(
-		new URL(import.meta.url).pathname,
-		"../../node_modules/@mariozechner/pi-coding-agent/dist/modes/interactive/theme/theme.js",
-	));
-}
-
-/**
- * Surgically invalidates one entry in Pi's registeredThemes cache.
- * Rebuilds the registry with a fresh disk-loaded instance for `name`,
- * keeping all other entries intact.
- */
-export function invalidateThemeCache(name: string): void {
-	try {
-		const mod = getThemeModule();
-		const allWithPaths = mod.getAvailableThemesWithPaths();
-		const updatedThemes = allWithPaths
-			.map(({ name: n, path: p }) => {
-				const instance = mod.getThemeByName(n);
-				if (!instance) return null;
-				if (n === name && p) return mod.loadThemeFromPath(p);
-				return instance;
-			})
-			.filter(Boolean);
-		mod.setRegisteredThemes(updatedThemes);
-	} catch {
-		// Non-fatal — setTheme(instance) fallback still works
-	}
-}
-
 /**
  * Write permanent theme, clean up old sync files, apply via setTheme.
  * Only call on final confirm — not during live preview (cleanup is expensive).
@@ -230,13 +189,12 @@ export function writeAndSetPiTheme(ctx: SessionContext, colors: CmuxColors, sour
 	writeFileSync(themePath, JSON.stringify(themeJson, null, 2));
 	cleanupOldSyncThemes([themeFile]);
 
-	// Invalidate the stale cache entry so setTheme reads fresh from disk
-	invalidateThemeCache(themeName);
-
-	const result = ctx.ui.setTheme(themeName);
-	if (!result.success) {
-		ctx.ui.notify(`cmux theme sync failed: ${result.error}`, "error");
-	}
+	// Use setTheme(instance) to bypass Pi's registeredThemes cache.
+	// setTheme(name) would return a stale cached instance if this theme
+	// was previously loaded under the same name. The instance path
+	// (setThemeInstance internally) always applies what we just built.
+	const instance = buildThemeInstance(colors, themeName, p, ctx);
+	ctx.ui.setTheme(instance);
 	return themeName;
 }
 
