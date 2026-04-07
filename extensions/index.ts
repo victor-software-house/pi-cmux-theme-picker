@@ -19,7 +19,7 @@ import {
 import { showThemePicker } from "./picker.js";
 import { getSettings, updateSettings, updateThemeParamInMemory, persistSettings, getThemeParams, restoreSettings } from "./settings.js";
 import { DEFAULT_THEME_PARAMS, type SessionContext, type ThemeParams } from "./types.js";
-import debounce from "lodash.debounce";
+import { debounce } from "perfect-debounce";
 
 const STATUS_KEY = "cmux-theme";
 
@@ -168,10 +168,10 @@ export default function (pi: ExtensionAPI) {
 				const slug = slugifyThemeName(cmuxTheme);
 				const instance = buildThemeInstance(cmuxColors, `cmux-preview-${slug}-${++previewSeq}`, getThemeParams(), ctx);
 				ctx.ui.setTheme(instance);
-			}, 50, { leading: true, trailing: true, maxWait: 100 });
+			}, 50, { leading: true, trailing: true });
 
 			// Persist debounced — disk write only after 500ms of inactivity
-			const schedulePersist = debounce(() => persistSettings(pi), 500);
+			const schedulePersist = debounce(() => persistSettings(pi), 500, { trailing: true });
 
 			const numericKeys = new Set<string>([
 				"mutedWeight", "dimWeight", "borderWeight",

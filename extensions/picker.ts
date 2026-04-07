@@ -12,7 +12,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { DynamicBorder } from "@mariozechner/pi-coding-agent";
 import { Container, Key, SelectList, Text, type SelectItem, matchesKey } from "@mariozechner/pi-tui";
-import debounce from "lodash.debounce";
+import { debounce } from "perfect-debounce";
 import { getCurrentCmuxThemeName, getAvailableCmuxThemes, runCmuxThemeSet } from "./cmux.js";
 import { writeAndSetPiTheme, buildThemeInstance } from "./pi-theme.js";
 import { getThemeParams } from "./settings.js";
@@ -56,7 +56,7 @@ export async function showThemePicker(_pi: ExtensionAPI, ctx: CommandContext): P
 		const instance = buildThemeInstance(entry.colors, `cmux-preview-${selectedTheme}`, getThemeParams(), ctx);
 		ctx.ui.setTheme(instance);
 		runCmuxThemeSet(selectedTheme);
-	}, 50, { leading: true, trailing: true, maxWait: 100 });
+	}, 50, { leading: true, trailing: true });
 
 	const closeWithConfirm = (themeName: string, done: (value: string | null) => void): void => {
 		if (closed) return;
