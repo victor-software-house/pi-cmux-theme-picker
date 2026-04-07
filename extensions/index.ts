@@ -159,16 +159,13 @@ export default function (pi: ExtensionAPI) {
 				];
 			};
 
-			// Decoupled preview: debounced, reads latest in-memory params.
-			// Counter ensures theme.name changes on every preview so renderer
-			// extensions that cache by name invalidate properly.
-			let previewSeq = 0;
+			// Trailing-only debounce — reads latest in-memory params, never blocks input.
 			const applyPreview = debounce(() => {
 				if (!cmuxColors || !cmuxTheme) return;
 				const slug = slugifyThemeName(cmuxTheme);
-				const instance = buildThemeInstance(cmuxColors, `cmux-preview-${slug}-${++previewSeq}`, getThemeParams(), ctx);
+				const instance = buildThemeInstance(cmuxColors, `cmux-preview-${slug}-${Date.now()}`, getThemeParams(), ctx);
 				ctx.ui.setTheme(instance);
-			}, 50, { leading: true, trailing: true });
+			}, 50);
 
 			// Persist debounced — disk write only after 500ms of inactivity
 			const schedulePersist = debounce(() => persistSettings(pi), 500, { trailing: true });

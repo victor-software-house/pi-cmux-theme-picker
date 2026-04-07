@@ -52,19 +52,18 @@ export async function showThemePicker(_pi: ExtensionAPI, ctx: CommandContext): P
 		: entries[0]!.name;
 	let closed = false;
 	let lastAppliedTheme: string | null = null;
-	let previewSeq = 0;
 
-	// --- Decoupled preview: debounced, reads latest selectedTheme ---
+	// Trailing-only debounce — NEVER runs during handleInput.
+	// Reads shared selectedTheme state, applies only the latest.
 	const applyPreview = debounce(() => {
 		if (closed || selectedTheme === lastAppliedTheme) return;
 		const entry = entryByName.get(selectedTheme);
 		if (!entry) return;
 		lastAppliedTheme = selectedTheme;
-		// Unique name per preview call — renderer caches keyed on theme.name always invalidate
-		const instance = buildThemeInstance(entry.colors, `cmux-preview-${selectedTheme}-${++previewSeq}`, getThemeParams(), ctx);
+		const instance = buildThemeInstance(entry.colors, `cmux-preview-${selectedTheme}-${Date.now()}`, getThemeParams(), ctx);
 		ctx.ui.setTheme(instance);
 		runCmuxThemeSet(selectedTheme);
-	}, 50, { leading: true, trailing: true });
+	}, 50);
 
 	const closeWithConfirm = (themeName: string, done: (value: string | null) => void): void => {
 		if (closed) return;
