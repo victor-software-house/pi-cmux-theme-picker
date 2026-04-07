@@ -18,7 +18,6 @@ import {
 } from "./pi-theme.js";
 import { showThemePicker } from "./picker.js";
 import { getSettings, updateSettings, updateThemeParamInMemory, persistSettings, getThemeParams, restoreSettings } from "./settings.js";
-import { throttle } from "./throttle.js";
 import { DEFAULT_THEME_PARAMS, type SessionContext, type ThemeParams } from "./types.js";
 
 const STATUS_KEY = "cmux-theme";
@@ -111,7 +110,7 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			const selected = await showThemePicker(ctx);
+			const selected = await showThemePicker(pi, ctx);
 			if (selected) {
 				updateStatus(ctx, selected);
 				ctx.ui.notify(`Theme "${selected}" applied`, "info");
@@ -126,6 +125,8 @@ export default function (pi: ExtensionAPI) {
 		handler: async (_args, ctx) => {
 			const cmuxTheme = getCurrentCmuxThemeName();
 			const cmuxColors = cmuxTheme ? getCmuxThemeColors(cmuxTheme) : null;
+
+			const SETTINGS_PREVIEW_EVENT = "cmux-settings-preview";
 
 			const buildItems = (): SettingItem[] => {
 				const p = getThemeParams();
@@ -159,13 +160,12 @@ export default function (pi: ExtensionAPI) {
 				];
 			};
 
-			// Leading+trailing throttle: first change applies instantly,
-			// rapid changes coalesce and apply the latest after 50ms cooldown.
-			const firePreview = throttle((_: void) => {
+			// Async preview via custom event
+			const unsubscribe = pi.events.on(SETTINGS_PREVIEW_EVENT, () => {
 				if (!cmuxColors || !cmuxTheme) return;
 				const instance = buildThemeInstance(cmuxColors, `cmux-sync-${slugifyThemeName(cmuxTheme)}`, getThemeParams(), ctx);
 				ctx.ui.setTheme(instance);
-			}, 50);
+			});
 
 			// Persist debounced — disk write only after 500ms of inactivity
 			let persistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -192,7 +192,7 @@ export default function (pi: ExtensionAPI) {
 				}
 				if (numericKeys.has(id)) {
 					updateThemeParamInMemory(id as keyof ThemeParams, parseFloat(newValue));
-					firePreview();
+					pi.events.emit(SETTINGS_PREVIEW_EVENT, undefined);
 					schedulePersist();
 					return;
 				}
@@ -200,7 +200,7 @@ export default function (pi: ExtensionAPI) {
 					const hex = newValue.startsWith("#") ? newValue : `#${newValue}`;
 					if (/^#[0-9a-fA-F]{6}$/.test(hex)) {
 						updateThemeParamInMemory(id as keyof ThemeParams, hex);
-						firePreview();
+						pi.events.emit(SETTINGS_PREVIEW_EVENT, undefined);
 						schedulePersist();
 					}
 				}
@@ -222,29 +222,36 @@ export default function (pi: ExtensionAPI) {
 				handleValueChange(item.id, newValue);
 			};
 
-			// Normal settings panel — no special invalidation
-			await ctx.ui.custom((tui, theme, _kb, done) => {
+			await ctx.ui.custom((tui, _theme, _kb, done) => {
+				const t = () => ctx.ui.theme;
 				const container = new Container();
 				items = buildItems();
 
+				// Use live theme callbacks — same pattern as the picker
 				settingsList = new SettingsList(
 					items,
 					12,
-					getSettingsListTheme(),
+					{
+						label: (text, selected) => selected ? t().fg("accent", text) : text,
+						value: (text, selected) => selected ? t().fg("accent", text) : t().fg("muted", text),
+						description: (text) => t().fg("dim", text),
+						cursor: t().fg("accent", "\u2192 "),
+						hint: (text) => t().fg("dim", text),
+					},
 					(id, newValue) => {
 						handleValueChange(id, newValue);
 						tui.requestRender();
 					},
 					() => {
-						firePreview.cancel();
+						unsubscribe();
 						if (persistTimer) { clearTimeout(persistTimer); persistSettings(pi); }
 						done(undefined);
 					},
 				);
 
-				container.addChild(new Text(theme.fg("accent", theme.bold(" Theme Generation Settings")), 1, 0));
+				container.addChild(new Text(t().fg("accent", t().bold(" Theme Generation Settings")), 1, 0));
 				container.addChild(settingsList);
-				container.addChild(new Text(theme.fg("dim", " \u2190\u2192 adjust \u00B7 enter/space cycle \u00B7 esc close"), 1, 0));
+				container.addChild(new Text(t().fg("dim", " \u2190\u2192 adjust \u00B7 enter/space cycle \u00B7 esc close"), 1, 0));
 
 				return {
 					render: (w) => container.render(w),

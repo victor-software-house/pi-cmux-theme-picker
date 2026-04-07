@@ -3,19 +3,19 @@
  *
  * Architecture:
  * - UI is a normal SelectList. Handles input, renders immediately.
- * - Preview is a fire-and-forget side effect via leading+trailing throttle.
- *   First selection fires instantly; rapid navigation coalesces and applies
- *   the latest theme after a cooldown. UI never blocks.
+ * - Preview fires a custom event — processed async, never blocks input.
  * - Disk write happens only on confirm (writeAndSetPiTheme).
  */
 
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { DynamicBorder } from "@mariozechner/pi-coding-agent";
 import { Container, Key, SelectList, Text, type SelectItem, matchesKey } from "@mariozechner/pi-tui";
 import { getCurrentCmuxThemeName, getAvailableCmuxThemes, runCmuxThemeSet } from "./cmux.js";
 import { writeAndSetPiTheme, buildThemeInstance } from "./pi-theme.js";
 import { getThemeParams } from "./settings.js";
-import { throttle } from "./throttle.js";
 import type { CmuxThemeEntry, FilterMode, CommandContext } from "./types.js";
+
+const PREVIEW_EVENT = "cmux-theme-preview";
 
 function isPrintableInput(data: string): boolean {
 	return data.length === 1 && data >= " " && data !== "\x7f";
@@ -27,7 +27,7 @@ function nextFilterMode(mode: FilterMode): FilterMode {
 	return "all";
 }
 
-export async function showThemePicker(ctx: CommandContext): Promise<string | null> {
+export async function showThemePicker(pi: ExtensionAPI, ctx: CommandContext): Promise<string | null> {
 	const entries = getAvailableCmuxThemes();
 	if (entries.length === 0) {
 		ctx.ui.notify("No cmux themes found", "warning");
@@ -45,21 +45,25 @@ export async function showThemePicker(ctx: CommandContext): Promise<string | nul
 		: entries[0]!.name;
 	let closed = false;
 
-	// Preview: leading+trailing throttle at 50ms.
-	// First selection applies instantly. Rapid navigation coalesces.
-	const applyPreview = throttle((themeName: string) => {
+	// Async preview via custom event — never blocks input processing
+	const unsubscribe = pi.events.on(PREVIEW_EVENT, (data: unknown) => {
+		const themeName = data as string;
 		if (closed) return;
 		const entry = entryByName.get(themeName);
 		if (!entry) return;
 		const instance = buildThemeInstance(entry.colors, `cmux-preview-${themeName}`, getThemeParams(), ctx);
 		ctx.ui.setTheme(instance);
 		runCmuxThemeSet(themeName);
-	}, 50);
+	});
+
+	const requestPreview = (themeName: string): void => {
+		if (!closed) pi.events.emit(PREVIEW_EVENT, themeName);
+	};
 
 	const closeWithConfirm = (themeName: string, done: (value: string | null) => void): void => {
 		if (closed) return;
 		closed = true;
-		applyPreview.cancel();
+		unsubscribe();
 		const entry = entryByName.get(themeName);
 		if (!entry) { ctx.ui.notify(`Theme not found: ${themeName}`, "error"); done(null); return; }
 		writeAndSetPiTheme(ctx, entry.colors, themeName, getThemeParams());
@@ -70,7 +74,7 @@ export async function showThemePicker(ctx: CommandContext): Promise<string | nul
 	const closeWithCancel = (done: (value: string | null) => void): void => {
 		if (closed) return;
 		closed = true;
-		applyPreview.cancel();
+		unsubscribe();
 		if (originalPiTheme) ctx.ui.setTheme(originalPiTheme);
 		if (originalCmuxTheme) runCmuxThemeSet(originalCmuxTheme);
 		done(null);
@@ -135,7 +139,7 @@ export async function showThemePicker(ctx: CommandContext): Promise<string | nul
 
 			selectList.onSelectionChange = (item) => {
 				selectedTheme = item.value;
-				applyPreview(item.value);
+				requestPreview(item.value);
 			};
 			selectList.onSelect = (item) => closeWithConfirm(item.value, done);
 			selectList.onCancel = () => closeWithCancel(done);
@@ -148,7 +152,7 @@ export async function showThemePicker(ctx: CommandContext): Promise<string | nul
 		};
 
 		rebuild();
-		if (selectedTheme) applyPreview(selectedTheme);
+		if (selectedTheme) requestPreview(selectedTheme);
 
 		return {
 			render: (width: number) => container.render(width),
