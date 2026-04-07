@@ -6,33 +6,41 @@ Live [cmux](https://cmux.dev) terminal theme picker for [Pi](https://pi.dev). Sy
 
 ## What it does
 
-- **Session start sync** — reads the active cmux theme and generates a matching Pi theme automatically.
-- **`/theme` command** — opens a TUI overlay to browse, filter, search, and live-preview all bundled cmux (Ghostty) themes. Confirm with Enter, cancel with Esc.
-- **`/theme "Theme Name"` shortcut** — apply a named theme directly without opening the picker.
+- **`/theme`** — opens an inline picker to browse, filter, search, and live-preview all bundled cmux (Ghostty) themes. Confirm with Enter, cancel with Esc.
+- **`/theme "Theme Name"`** — apply a named theme directly without opening the picker.
+- **`/theme-settings`** — toggle extension settings (auto-sync on session start).
+- **Auto-sync** (opt-in) — reads the active cmux theme and generates a matching Pi theme on session start.
 
 ## Install
 
 ```
-pi install git:git@github.com:victor-software-house/pi-cmux-theme-picker
+pi install pi-cmux-theme-picker
 ```
 
 ## Usage
 
 ```
-/theme              # Open the picker overlay
+/theme              # Open the picker
 /theme Catppuccin   # Apply a theme directly by name
+/theme-settings     # Toggle auto-sync and other settings
 ```
 
 ### Picker controls
 
 | Key | Action |
 |:---|:---|
-| `↑` / `↓` | Navigate themes |
+| `Up` / `Down` | Navigate themes with live preview |
 | `Enter` | Apply selected theme |
 | `Esc` | Cancel and restore original |
-| `Tab` | Cycle filter: all → dark → light |
+| `Tab` | Cycle filter: all / dark / light |
 | Type | Incremental search |
 | `Backspace` | Delete search character |
+
+### Settings
+
+| Setting | Default | Description |
+|:---|:---|:---|
+| Auto-sync on session start | off | Sync Pi theme from current cmux theme when a session starts |
 
 ## How it works
 

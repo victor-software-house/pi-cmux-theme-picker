@@ -2,6 +2,7 @@
  * TUI overlay — live cmux theme picker with debounced preview.
  *
  * Design:
+ * - Renders inline at the bottom (no overlay) for a cleaner look.
  * - True debounce (DEBOUNCE_MS): resets timer on every keypress. setTheme and
  *   cmux only fire once the user pauses — no updates while scrolling fast.
  * - Background prewrite (setImmediate): JSON file is written in the next I/O
@@ -34,11 +35,11 @@ function nextFilterMode(mode: FilterMode): FilterMode {
 	return "all";
 }
 
-export async function showThemePicker(ctx: CommandContext): Promise<void> {
+export async function showThemePicker(ctx: CommandContext): Promise<string | null> {
 	const entries = getAvailableCmuxThemes();
 	if (entries.length === 0) {
 		ctx.ui.notify("No cmux themes found", "warning");
-		return;
+		return null;
 	}
 
 	const entryByName = new Map(entries.map((e) => [e.name, e]));
@@ -87,13 +88,11 @@ export async function showThemePicker(ctx: CommandContext): Promise<void> {
 		const entry = entryByName.get(themeName);
 		if (!entry) return;
 		lastPreviewName = themeName;
-		// Fallback sync write if prewrite lost the race
 		if (!prewritten.has(themeName)) {
 			ensureThemesDir();
 			writePreviewFile(entry.colors, themeName);
 			prewritten.add(themeName);
 		}
-		// Both back-to-back — minimum gap between pi and cmux
 		ctx.ui.setTheme(previewNameFor(themeName));
 		runCmuxThemeSet(themeName);
 	};
@@ -112,7 +111,7 @@ export async function showThemePicker(ctx: CommandContext): Promise<void> {
 	};
 
 	// --- Close handlers ---
-	const closeWithConfirm = (themeName: string, done: (value: void) => void): void => {
+	const closeWithConfirm = (themeName: string, done: (value: string | null) => void): void => {
 		if (closed) return;
 		closed = true;
 		clearDebounce();
@@ -121,16 +120,16 @@ export async function showThemePicker(ctx: CommandContext): Promise<void> {
 		const entry = entryByName.get(themeName);
 		if (!entry) {
 			ctx.ui.notify(`Theme not found: ${themeName}`, "error");
-			done(undefined);
+			done(null);
 			return;
 		}
 
 		writeAndSetPiTheme(ctx, entry.colors, themeName);
 		runCmuxThemeSet(themeName);
-		done(undefined);
+		done(themeName);
 	};
 
-	const closeWithCancel = (done: (value: void) => void): void => {
+	const closeWithCancel = (done: (value: string | null) => void): void => {
 		if (closed) return;
 		closed = true;
 		clearDebounce();
@@ -138,11 +137,11 @@ export async function showThemePicker(ctx: CommandContext): Promise<void> {
 
 		if (originalPiTheme) ctx.ui.setTheme(originalPiTheme);
 		if (originalCmuxTheme) runCmuxThemeSet(originalCmuxTheme);
-		done(undefined);
+		done(null);
 	};
 
-	// --- Overlay ---
-	await ctx.ui.custom<void>((tui, _factoryTheme, _keybindings, done) => {
+	// --- Inline component (no overlay) ---
+	const selected = await ctx.ui.custom<string | null>((tui, _factoryTheme, _keybindings, done) => {
 		const t = () => ctx.ui.theme;
 		const container = new Container();
 		let selectList: SelectList | null = null;
@@ -166,7 +165,7 @@ export async function showThemePicker(ctx: CommandContext): Promise<void> {
 				return {
 					value: entry.name,
 					label: entry.name,
-					description: tags.join(" · "),
+					description: tags.join(" \u00B7 "),
 				};
 			});
 		};
@@ -181,9 +180,12 @@ export async function showThemePicker(ctx: CommandContext): Promise<void> {
 			}
 
 			container.clear();
-			container.addChild(new DynamicBorder((s: string) => t().fg("borderMuted", s)));
-			container.addChild(new Text(theme.fg("accent", theme.bold("cmux Theme Picker")), 1, 0));
-			container.addChild(new Text(theme.fg("dim", `Mode: ${filterMode} · Search: ${searchText || "\u2014"}`), 1, 0));
+			container.addChild(new DynamicBorder((s: string) => t().fg("accent", s)));
+			container.addChild(new Text(
+				theme.fg("accent", theme.bold(" cmux Theme Picker")) +
+				"  " +
+				theme.fg("dim", `${filterMode} \u00B7 ${searchText || "\u2014"}`),
+			));
 
 			selectList = new SelectList(items, 14, {
 				selectedPrefix: (text) => t().fg("accent", text),
@@ -205,10 +207,9 @@ export async function showThemePicker(ctx: CommandContext): Promise<void> {
 
 			container.addChild(selectList);
 			container.addChild(new Text(
-				theme.fg("dim", "type to search \u00B7 backspace delete \u00B7 tab all/dark/light \u00B7 \u2191\u2193 navigate \u00B7 enter apply \u00B7 esc cancel"),
-				1, 0,
+				theme.fg("dim", " type to search \u00B7 backspace delete \u00B7 tab all/dark/light \u00B7 \u2191\u2193 navigate \u00B7 enter apply \u00B7 esc cancel"),
 			));
-			container.addChild(new DynamicBorder((s: string) => t().fg("borderMuted", s)));
+			container.addChild(new DynamicBorder((s: string) => t().fg("accent", s)));
 		};
 
 		rebuild();
@@ -245,5 +246,7 @@ export async function showThemePicker(ctx: CommandContext): Promise<void> {
 				tui.requestRender();
 			},
 		};
-	}, { overlay: true });
+	});
+
+	return selected ?? null;
 }
