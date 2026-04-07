@@ -10,9 +10,7 @@ import { getMarkdownTheme, type ExtensionAPI, type ExtensionContext } from "@mar
 import { Container, Key, Markdown, type AutocompleteItem, type Component, type OverlayHandle, type SettingItem, SettingsList, Spacer, Text, Box, matchesKey } from "@mariozechner/pi-tui";
 import { getCurrentCmuxThemeName, getCmuxThemeColors, getAvailableCmuxThemes, runCmuxThemeSet } from "./cmux.js";
 import { ensureSemanticHue, hexToRgb, mixColors } from "./colors.js";
-import { writeFileSync, unlinkSync, mkdirSync, existsSync } from "node:fs";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
+
 import {
 	slugifyThemeName,
 	writeAndSetPiTheme,
@@ -167,31 +165,21 @@ async function captureRunner(pi: ExtensionAPI): Promise<void> {
 	} catch { /* ToolExecutionComponent not available */ }
 }
 
-function createToolPreviewSync(name: string, args: Record<string, unknown>): Component | null {
+/** Create a completed ToolExecutionComponent with mocked result — no actual execution. */
+function createMockedTool(
+	name: string,
+	args: Record<string, unknown>,
+	result: { content: { type: string; text: string }[]; details?: unknown; isError: boolean },
+): Component | null {
 	if (!_tecClass || !_runner) return null;
 	const def = _runner.getToolDefinition(name);
 	if (!def) return null;
 	const mockUi = { requestRender: () => {} };
 	const comp = new _tecClass(name, `preview-${name}-${Date.now()}`, args, { showImages: false }, def, mockUi, process.cwd());
 	comp.setArgsComplete();
-	return comp;
-}
-
-/** Execute a real tool call and feed the result into a ToolExecutionComponent. */
-async function executeToolPreview(
-	comp: any, name: string, args: Record<string, unknown>, ctx: any,
-): Promise<void> {
-	if (!_runner) return;
-	const def = _runner.getToolDefinition(name);
-	if (!def?.execute) return;
-	try {
-		comp.markExecutionStarted();
-		const ac = new AbortController();
-		const result = await def.execute(`preview-${name}`, args, ac.signal, () => {}, ctx);
-		comp.updateResult({ ...result, isError: false });
-	} catch (e: any) {
-		comp.updateResult({ content: [{ type: "text", text: e.message }], isError: true });
-	}
+	comp.markExecutionStarted();
+	comp.updateResult(result);
+	return comp as Component;
 }
 
 /**
@@ -207,11 +195,7 @@ interface PreviewPage {
 }
 
 function getPreviewPages(): PreviewPage[] {
-	// Prepare temp file once
-	const previewDir = join(tmpdir(), "pi-theme-preview");
-	if (!existsSync(previewDir)) mkdirSync(previewDir, { recursive: true });
-	const sampleFile = join(previewDir, "auth.ts");
-	writeFileSync(sampleFile, [
+	const sampleCode = [
 		'import { verify } from "./crypto";',
 		"",
 		"export async function login(user: string, token: string) {",
@@ -219,15 +203,15 @@ function getPreviewPages(): PreviewPage[] {
 		'  if (!valid) throw new Error("invalid token");',
 		'  return { user, role: "admin" };',
 		"}",
-	].join("\n"));
+	].join("\n");
 
 	return [
-		// Page 1: Messages — user msg, assistant text, markdown, custom msg
+		// Page 1: Messages — user msg, assistant text, custom msg, selected
 		{
 			title: "Messages",
 			build: (theme) => {
 				const c = new Container();
-				c.addChild(new Markdown("> Fix the auth bug in login.ts", 1, 1, getMarkdownTheme(), {
+				c.addChild(new Markdown("Fix the auth bug in login.ts", 1, 1, getMarkdownTheme(), {
 					bgColor: (text: string) => theme.bg("userMessageBg", text),
 					color: (text: string) => theme.fg("userMessageText", text),
 				}));
@@ -245,7 +229,7 @@ function getPreviewPages(): PreviewPage[] {
 					1, 0, getMarkdownTheme(),
 				));
 				c.addChild(new Spacer(1));
-				c.addChild(new Markdown("Waiting for approval", 1, 1, getMarkdownTheme(), {
+				c.addChild(new Markdown("\u2139 Extension notice: theme synced", 1, 1, getMarkdownTheme(), {
 					bgColor: (text: string) => theme.bg("customMessageBg", text),
 					color: (text: string) => theme.fg("customMessageText", text),
 				}));
@@ -259,66 +243,64 @@ function getPreviewPages(): PreviewPage[] {
 		// Page 2: Read tool
 		{
 			title: "Read",
-			build: (theme) => {
+			build: (_theme) => {
 				const c = new Container();
-				const args = { path: sampleFile, limit: 7 };
-				const comp = createToolPreviewSync("read", args);
+				const comp = createMockedTool("read", { path: "src/auth.ts" }, {
+					content: [{ type: "text", text: sampleCode }],
+					details: { _type: "readFile", filePath: "src/auth.ts", content: sampleCode, offset: 1, lineCount: 7 },
+					isError: false,
+				});
 				if (comp) c.addChild(comp);
 				c.addChild(new Markdown(
 					"**Syntax-highlighted** file content.\n" +
-					"Uses `toolSuccessBg` background, `toolTitle` for the header, " +
-					"and `toolOutput` for the content.\n\n" +
-					"Colors: `syntaxKeyword` `syntaxFunction` `syntaxString` `syntaxVariable`",
+					"Background: `toolSuccessBg` \u00B7 Header: `toolTitle` \u00B7 Content: `toolOutput`\n\n" +
+					"Syntax: `syntaxKeyword` `syntaxFunction` `syntaxString` `syntaxVariable`",
 					1, 1, getMarkdownTheme(),
 				));
-				return { container: c, executions: comp ? [{ comp, name: "read", args }] : [] };
+				return { container: c, executions: [] };
 			},
 		},
 		// Page 3: Edit tool
 		{
 			title: "Edit",
-			build: (theme) => {
-				// Re-write file so edit can find the original text
-				writeFileSync(sampleFile, [
-					'import { verify } from "./crypto";',
-					"",
-					"export async function login(user: string, token: string) {",
-					"  const valid = await verify(token);",
-					'  if (!valid) throw new Error("invalid token");',
-					'  return { user, role: "admin" };',
-					"}",
-				].join("\n"));
+			build: (_theme) => {
 				const c = new Container();
-				const args = {
-					path: sampleFile,
-					edits: [{ oldText: "  const valid = await verify(token);", newText: '  const valid = await verify(token, "HS256");' }],
-				};
-				const comp = createToolPreviewSync("edit", args);
+				const comp = createMockedTool("edit", {
+					path: "src/auth.ts",
+					edits: [{ oldText: "await verify(token)", newText: 'await verify(token, "HS256")' }],
+				}, {
+					content: [{ type: "text", text: "1 edit applied" }],
+					details: { diff: "--- src/auth.ts\n+++ src/auth.ts\n@@ -3,4 +3,4 @@\n export async function login(user: string, token: string) {\n-  const valid = await verify(token);\n+  const valid = await verify(token, \"HS256\");\n   if (!valid) throw new Error(\"invalid token\");" },
+					isError: false,
+				});
 				if (comp) c.addChild(comp);
 				c.addChild(new Markdown(
 					"**Inline diff** with colored changes.\n" +
-					"Uses `toolSuccessBg` on success, `toolDiffAdded` for **+** lines, " +
-					"`toolDiffRemoved` for **-** lines, `toolDiffContext` for unchanged.",
+					"Added: `toolDiffAdded` \u00B7 Removed: `toolDiffRemoved` \u00B7 Context: `toolDiffContext`\n\n" +
+					"Background: `toolSuccessBg` on success, `toolErrorBg` on failure.",
 					1, 1, getMarkdownTheme(),
 				));
-				return { container: c, executions: comp ? [{ comp, name: "edit", args }] : [] };
+				return { container: c, executions: [] };
 			},
 		},
 		// Page 4: Bash tool
 		{
 			title: "Bash",
-			build: (theme) => {
+			build: (_theme) => {
 				const c = new Container();
-				const args = { command: "echo 'Tests passed: 3/3'" };
-				const comp = createToolPreviewSync("bash", args);
+				const comp = createMockedTool("bash", { command: "npm test" }, {
+					content: [{ type: "text", text: "PASS src/auth.test.ts\n  \u2714 login validates token (3ms)\n  \u2714 login rejects invalid (1ms)\n\nTests: 2 passed, 2 total" }],
+					details: { rawText: "PASS src/auth.test.ts\n  \u2714 login validates token (3ms)\n  \u2714 login rejects invalid (1ms)\n\nTests: 2 passed, 2 total", exitCode: 0 },
+					isError: false,
+				});
 				if (comp) c.addChild(comp);
 				c.addChild(new Markdown(
-					"**Command** output with exit status.\n" +
-					"Uses `toolSuccessBg` on exit 0, `toolErrorBg` on failure.\n" +
-					"Output in `toolOutput`, timing in `muted`.",
+					"**Command** output with exit status and timing.\n" +
+					"Success: `toolSuccessBg` \u00B7 Failure: `toolErrorBg`\n\n" +
+					"Output: `toolOutput` \u00B7 Timing: `muted`",
 					1, 1, getMarkdownTheme(),
 				));
-				return { container: c, executions: comp ? [{ comp, name: "bash", args }] : [] };
+				return { container: c, executions: [] };
 			},
 		},
 	];
@@ -332,7 +314,7 @@ class ThemePreview implements Component {
 	private maxHeightDirty = true;
 	private lastRenderWidth = 0;
 	private _lastTheme: any = null;
-	_pendingExecutions: { comp: any; name: string; args: Record<string, unknown> }[] = [];
+
 
 	// biome-ignore lint: Theme proxy has typed keys but we use string-based lookups
 	rebuild(t: () => any): void {
@@ -348,7 +330,7 @@ class ThemePreview implements Component {
 		if (!page) return;
 		const { container, executions } = page.build(theme);
 		this.pageContainer = container;
-		this._pendingExecutions = executions;
+
 	}
 
 	nextPage(): void { this.pageIdx = (this.pageIdx + 1) % this.pages.length; }
@@ -626,14 +608,7 @@ export default function (pi: ExtensionAPI) {
 
 				// Theme preview overlay — non-capturing, anchored right.
 				const preview = new ThemePreview();
-				const updatePreview = (): void => {
-					preview.rebuild(t);
-					// Fire async tool executions — results update components in place.
-					for (const { comp, name, args } of preview._pendingExecutions) {
-						executeToolPreview(comp, name, args, ctx).then(() => tui.requestRender());
-					}
-					preview._pendingExecutions = [];
-				};
+				const updatePreview = (): void => { preview.rebuild(t); };
 				updatePreview();
 				const previewHandle = (tui as any).showOverlay(preview, {
 					nonCapturing: true,
