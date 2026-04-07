@@ -1,7 +1,6 @@
 # DR-02: Force bump rules for visible changes
 
-**Status:** planned (blocked by [DR-01](DR-01-changesets-migration.md))
-**Priority:** next
+**Status:** superseded by [DR-01](DR-01-changesets-migration.md)
 
 ## Problem
 
@@ -30,3 +29,7 @@ This decision becomes moot. With changesets, any change that should trigger a re
 ## Decision
 
 Do not implement the semantic-release rules. Wait for DR-01 (changesets migration) which solves this naturally.
+
+## Resolution
+
+Superseded by DR-01. With changesets, any change that needs a release gets a changeset file with an explicit bump type — regardless of commit type. The semantic-release `releaseRules` approach described above was never implemented.

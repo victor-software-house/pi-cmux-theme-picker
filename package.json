@@ -47,17 +47,14 @@
     "@mariozechner/pi-tui": "*"
   },
   "devDependencies": {
+    "@changesets/changelog-github": "^0.6.0",
+    "@changesets/cli": "^2.30.0",
     "@commitlint/cli": "20",
     "@commitlint/config-conventional": "20",
     "@mariozechner/pi-coding-agent": "^0.63.0",
     "@mariozechner/pi-tui": "^0.63.0",
-    "@semantic-release/changelog": "6",
-    "@semantic-release/git": "10",
-    "@semantic-release/github": "12",
-    "@semantic-release/npm": "13",
     "@types/node": "^24.3.0",
     "lefthook": "2",
-    "semantic-release": "25",
     "typescript": "^5.9.3"
   },
   "dependencies": {
