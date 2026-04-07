@@ -189,12 +189,13 @@ export function writeAndSetPiTheme(ctx: SessionContext, colors: CmuxColors, sour
 	writeFileSync(themePath, JSON.stringify(themeJson, null, 2));
 	cleanupOldSyncThemes([themeFile]);
 
-	// Apply via instance — bypasses registeredThemes cache entirely.
-	// setTheme(name) would return a stale cached instance if this name
-	// was previously loaded. The watcher approach has a 100ms race: if the
-	// user opens the picker before it fires, originalPiTheme captures the
-	// old instance and picker cancel kills the watcher via stopThemeWatcher().
-	const instance = buildThemeInstance(colors, themeName, p, ctx);
+	// Register the constant name with Pi's settingsManager so it persists across restarts.
+	// This loads a potentially stale cached instance — we immediately override it below.
+	ctx.ui.setTheme(themeName);
+
+	// Apply a uniquely-named instance so renderer caches (keyed on theme.name) always
+	// invalidate. File name stays constant; in-memory name is ephemeral.
+	const instance = buildThemeInstance(colors, `${themeName}-${Date.now()}`, p, ctx);
 	ctx.ui.setTheme(instance);
 	return themeName;
 }
