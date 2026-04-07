@@ -47,12 +47,11 @@ export function removePreviewThemeFiles(): void {
 	}
 }
 
-function computeThemeHash(colors: CmuxColors, p?: ThemeParams): string {
+function computeThemeHash(colors: CmuxColors): string {
 	const parts: string[] = [];
 	parts.push(`bg=${colors.background}`);
 	parts.push(`fg=${colors.foreground}`);
 	for (let i = 0; i <= 15; i++) parts.push(`p${i}=${colors.palette[i] ?? ""}`);
-	if (p) parts.push(`params=${JSON.stringify(p)}`);
 	const signature = parts.join("\n");
 	return createHash("sha1").update(signature).digest("hex").slice(0, 8);
 }
@@ -180,9 +179,9 @@ export function generatePiTheme(colors: CmuxColors, themeName: string, p: ThemeP
  */
 export function writeAndSetPiTheme(ctx: SessionContext, colors: CmuxColors, sourceThemeName: string, p: ThemeParams): string {
 	ensureThemesDir();
-	const hash = computeThemeHash(colors, p);
+	const hash = computeThemeHash(colors);
 	const slug = slugifyThemeName(sourceThemeName);
-	const themeName = slug ? `cmux-sync-${slug}-${hash}` : `cmux-sync-${hash}`;
+	const themeName = slug ? `cmux-sync-${slug}` : `cmux-sync-${hash}`;
 	const themeFile = `${themeName}.json`;
 	const themePath = join(PI_THEMES_DIR, themeFile);
 
@@ -190,10 +189,11 @@ export function writeAndSetPiTheme(ctx: SessionContext, colors: CmuxColors, sour
 	writeFileSync(themePath, JSON.stringify(themeJson, null, 2));
 	cleanupOldSyncThemes([themeFile]);
 
-	const result = ctx.ui.setTheme(themeName);
-	if (!result.success) {
-		ctx.ui.notify(`cmux theme sync failed: ${result.error}`, "error");
-	}
+	// Build in-memory instance with the clean name and apply directly.
+	// ctx.ui.setTheme(name) would hit registeredThemes cache and return
+	// a stale instance if this theme name was loaded before with different params.
+	const instance = buildThemeInstance(colors, themeName, p, ctx);
+	ctx.ui.setTheme(instance);
 	return themeName;
 }
 
@@ -214,8 +214,8 @@ export function writePreviewFile(colors: CmuxColors, themeName: string, p: Theme
 export function writeAndPreviewPiTheme(ctx: SessionContext, colors: CmuxColors, sourceThemeName: string, p: ThemeParams): void {
 	ensureThemesDir();
 	const slug = slugifyThemeName(sourceThemeName);
-	const hash = computeThemeHash(colors, p);
-	const themeName = slug ? `cmux-sync-${slug}-${hash}` : `cmux-sync-${hash}`;
+	const hash = computeThemeHash(colors);
+	const themeName = slug ? `cmux-sync-${slug}` : `cmux-sync-${hash}`;
 	const themePath = join(PI_THEMES_DIR, `${themeName}.json`);
 	writeFileSync(themePath, JSON.stringify(generatePiTheme(colors, themeName, p), null, 2));
 	ctx.ui.setTheme(themeName);
