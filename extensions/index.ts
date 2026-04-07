@@ -17,7 +17,7 @@ import {
 	buildThemeInstance,
 } from "./pi-theme.js";
 import { showThemePicker } from "./picker.js";
-import { getSettings, updateSettings, updateThemeParamInMemory, persistSettings, getThemeParams, restoreSettings } from "./settings.js";
+import { getSettings, updateSettings, updateThemeParamInMemory, persistSettings, getThemeParams, getPreviewDebounceMs, loadSettings } from "./settings.js";
 import { DEFAULT_THEME_PARAMS, type SessionContext, type ThemeParams } from "./types.js";
 import { debounce } from "perfect-debounce";
 
@@ -75,7 +75,7 @@ function numRange(min: number, max: number, step: number, decimals: number): str
 export default function (pi: ExtensionAPI) {
 	// --- Session lifecycle ---
 	pi.on("session_start", async (_event, ctx) => {
-		restoreSettings(ctx);
+		loadSettings(ctx.cwd);
 		cachedThemeNames = getAvailableCmuxThemes().map((e) => e.name);
 
 		if (getSettings().autoSync) {
@@ -156,6 +156,7 @@ export default function (pi: ExtensionAPI) {
 					{ id: "accentFallback", label: `${swatch(p.accentFallback)} Accent fallback`, currentValue: p.accentFallback, description: "Used when palette[5] is missing" },
 					{ id: "accentAltFallback", label: `${swatch(p.accentAltFallback)} Accent alt fallback`, currentValue: p.accentAltFallback, description: "Used when palette[6] is missing" },
 					{ id: "linkContrastMin", label: "Link contrast minimum", currentValue: p.linkContrastMin.toFixed(1), values: contrastRange, description: "Minimum contrast ratio for readable links (WCAG AA = 4.5)" },
+					{ id: "previewDebounceMs", label: "Preview debounce (ms)", currentValue: settings.previewDebounceMs.toFixed(0), values: numRange(10, 200, 10, 0), description: "Cooldown before theme preview applies (lower = faster, higher = smoother navigation)" },
 				];
 			};
 
@@ -165,10 +166,10 @@ export default function (pi: ExtensionAPI) {
 				const slug = slugifyThemeName(cmuxTheme);
 				const instance = buildThemeInstance(cmuxColors, `cmux-preview-${slug}-${Date.now()}`, getThemeParams(), ctx);
 				ctx.ui.setTheme(instance);
-			}, 50);
+			}, getPreviewDebounceMs());
 
 			// Persist debounced — disk write only after 500ms of inactivity
-			const schedulePersist = debounce(() => persistSettings(pi), 500, { trailing: true });
+			const schedulePersist = debounce(() => persistSettings(), 500, { trailing: true });
 
 			const numericKeys = new Set<string>([
 				"mutedWeight", "dimWeight", "borderWeight",
@@ -183,7 +184,11 @@ export default function (pi: ExtensionAPI) {
 
 			const handleValueChange = (id: string, newValue: string): void => {
 				if (id === "autoSync") {
-					updateSettings(pi, { autoSync: newValue === "on" });
+					updateSettings({ autoSync: newValue === "on" });
+					return;
+				}
+				if (id === "previewDebounceMs") {
+					updateSettings({ previewDebounceMs: parseInt(newValue, 10) });
 					return;
 				}
 				if (numericKeys.has(id)) {

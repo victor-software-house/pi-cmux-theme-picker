@@ -15,7 +15,7 @@ import { Container, Key, SelectList, Text, type SelectItem, matchesKey } from "@
 import { debounce } from "perfect-debounce";
 import { getCurrentCmuxThemeName, getAvailableCmuxThemes, runCmuxThemeSet } from "./cmux.js";
 import { writeAndSetPiTheme, buildThemeInstance } from "./pi-theme.js";
-import { getThemeParams } from "./settings.js";
+import { getThemeParams, getPreviewDebounceMs } from "./settings.js";
 import type { CmuxThemeEntry, FilterMode, CommandContext } from "./types.js";
 
 function isPrintableInput(data: string): boolean {
@@ -63,7 +63,7 @@ export async function showThemePicker(_pi: ExtensionAPI, ctx: CommandContext): P
 		const instance = buildThemeInstance(entry.colors, `cmux-preview-${selectedTheme}-${Date.now()}`, getThemeParams(), ctx);
 		ctx.ui.setTheme(instance);
 		runCmuxThemeSet(selectedTheme);
-	}, 50);
+	}, getPreviewDebounceMs());
 
 	const closeWithConfirm = (themeName: string, done: (value: string | null) => void): void => {
 		if (closed) return;
