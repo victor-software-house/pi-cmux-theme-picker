@@ -129,6 +129,10 @@ class ThemePreview implements Component {
 	rebuild(t: () => any): void {
 		const theme = t();
 		this.container = new Container();
+		this.setBorderFn(
+			(s: string) => theme.fg("borderMuted", s),
+			(s: string) => theme.fg("accent", s),
+		);
 
 		// --- User message ---
 		this.container.addChild(new Spacer(1));
@@ -204,7 +208,33 @@ class ThemePreview implements Component {
 	}
 
 	invalidate(): void { this.container.invalidate(); }
-	render(width: number): string[] { return this.container.render(width); }
+
+	render(width: number): string[] {
+		const inner = Math.max(1, width - 2);
+		const content = this.container.render(inner);
+
+		// Border using theme border color via the live theme proxy
+		const b = (s: string) => this.borderFn?.(s) ?? s;
+		const title = this.titleFn?.(" Preview ") ?? " Preview ";
+		const titleW = title.replace(/\x1b\[[^m]*m/g, "").length;
+		const topFill = Math.max(0, inner - titleW);
+		const top = b("\u256D") + title + b("\u2500".repeat(topFill)) + b("\u256E");
+		const bot = b("\u2570") + b("\u2500".repeat(inner)) + b("\u256F");
+		const wrap = (line: string): string => {
+			// Pad line to inner width for clean right border
+			const vis = line.replace(/\x1b\[[^m]*m/g, "").length;
+			const pad = Math.max(0, inner - vis);
+			return b("\u2502") + line + " ".repeat(pad) + b("\u2502");
+		};
+		return [top, ...content.map(wrap), bot];
+	}
+
+	private borderFn?: (s: string) => string;
+	private titleFn?: (s: string) => string;
+	setBorderFn(border: (s: string) => string, title: (s: string) => string): void {
+		this.borderFn = border;
+		this.titleFn = title;
+	}
 }
 
 export default function (pi: ExtensionAPI) {
