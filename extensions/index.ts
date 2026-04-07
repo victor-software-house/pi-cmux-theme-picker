@@ -123,7 +123,6 @@ export default function (pi: ExtensionAPI) {
 		description: "Configure cmux theme picker and theme generation settings",
 
 		handler: async (_args, ctx) => {
-			// Snapshot current cmux theme for live preview
 			const cmuxTheme = getCurrentCmuxThemeName();
 			const cmuxColors = cmuxTheme ? getCmuxThemeColors(cmuxTheme) : null;
 
@@ -131,7 +130,6 @@ export default function (pi: ExtensionAPI) {
 				const p = getThemeParams();
 				const settings = getSettings();
 
-				// Discrete value ranges
 				const weight01 = numRange(0.0, 1.0, 0.05, 2);
 				const bgShiftRange = numRange(1, 30, 1, 0);
 				const factorRange = numRange(0.0, 1.0, 0.1, 1);
@@ -139,65 +137,83 @@ export default function (pi: ExtensionAPI) {
 				const contrastRange = numRange(1.5, 6.0, 0.5, 1);
 
 				return [
-					// --- General ---
 					{ id: "autoSync", label: "Auto-sync on session start", currentValue: settings.autoSync ? "on" : "off", values: ["on", "off"] },
-
-					// --- Text blending ---
 					{ id: "mutedWeight", label: "Muted text weight", currentValue: p.mutedWeight.toFixed(2), values: weight01, description: "fg/bg mix for muted text (higher = more fg)" },
 					{ id: "dimWeight", label: "Dim text weight", currentValue: p.dimWeight.toFixed(2), values: weight01, description: "fg/bg mix for dim text" },
 					{ id: "borderWeight", label: "Border weight", currentValue: p.borderWeight.toFixed(2), values: weight01, description: "fg/bg mix for muted borders" },
-
-					// --- Background shift ---
 					{ id: "bgShift", label: "Background shift", currentValue: p.bgShift.toFixed(0), values: bgShiftRange, description: "Brightness offset for derived backgrounds (higher = more contrast)" },
 					{ id: "selectedBgFactor", label: "Selected bg factor", currentValue: p.selectedBgFactor.toFixed(1), values: factorRange, description: "Multiplier of bgShift for selected item bg" },
 					{ id: "userMsgBgFactor", label: "User message bg factor", currentValue: p.userMsgBgFactor.toFixed(1), values: factorRange, description: "Multiplier of bgShift for user message bg" },
 					{ id: "toolPendingBgFactor", label: "Tool pending bg factor", currentValue: p.toolPendingBgFactor.toFixed(1), values: factorRange, description: "Multiplier of bgShift for tool pending bg" },
-
-					// --- Tint strength ---
 					{ id: "toolSuccessTint", label: "Tool success tint", currentValue: p.toolSuccessTint.toFixed(2), values: tintRange, description: "bg/success blend (higher = more bg, subtler tint)" },
 					{ id: "toolErrorTint", label: "Tool error tint", currentValue: p.toolErrorTint.toFixed(2), values: tintRange, description: "bg/error blend" },
 					{ id: "customMsgTint", label: "Custom msg tint", currentValue: p.customMsgTint.toFixed(2), values: tintRange, description: "bg/accent blend for custom messages" },
-
-					// --- Semantic fallback colors ---
-					{ id: "errorFallback", label: `${swatch(p.errorFallback)} Error fallback`, currentValue: p.errorFallback, values: undefined, description: "Fallback when palette[1] hue is too far from red" },
-					{ id: "successFallback", label: `${swatch(p.successFallback)} Success fallback`, currentValue: p.successFallback, values: undefined, description: "Fallback when palette[2] hue is too far from green" },
-					{ id: "warningFallback", label: `${swatch(p.warningFallback)} Warning fallback`, currentValue: p.warningFallback, values: undefined, description: "Fallback when palette[3] hue is too far from yellow" },
-					{ id: "linkFallback", label: `${swatch(p.linkFallback)} Link fallback`, currentValue: p.linkFallback, values: undefined, description: "Fallback when palette[4] hue is too far from blue" },
-					{ id: "accentFallback", label: `${swatch(p.accentFallback)} Accent fallback`, currentValue: p.accentFallback, values: undefined, description: "Used when palette[5] is missing" },
-					{ id: "accentAltFallback", label: `${swatch(p.accentAltFallback)} Accent alt fallback`, currentValue: p.accentAltFallback, values: undefined, description: "Used when palette[6] is missing" },
-
-					// --- Contrast ---
+					{ id: "errorFallback", label: `${swatch(p.errorFallback)} Error fallback`, currentValue: p.errorFallback, description: "Fallback when palette[1] hue is too far from red" },
+					{ id: "successFallback", label: `${swatch(p.successFallback)} Success fallback`, currentValue: p.successFallback, description: "Fallback when palette[2] hue is too far from green" },
+					{ id: "warningFallback", label: `${swatch(p.warningFallback)} Warning fallback`, currentValue: p.warningFallback, description: "Fallback when palette[3] hue is too far from yellow" },
+					{ id: "linkFallback", label: `${swatch(p.linkFallback)} Link fallback`, currentValue: p.linkFallback, description: "Fallback when palette[4] hue is too far from blue" },
+					{ id: "accentFallback", label: `${swatch(p.accentFallback)} Accent fallback`, currentValue: p.accentFallback, description: "Used when palette[5] is missing" },
+					{ id: "accentAltFallback", label: `${swatch(p.accentAltFallback)} Accent alt fallback`, currentValue: p.accentAltFallback, description: "Used when palette[6] is missing" },
 					{ id: "linkContrastMin", label: "Link contrast minimum", currentValue: p.linkContrastMin.toFixed(1), values: contrastRange, description: "Minimum contrast ratio for readable links (WCAG AA = 4.5)" },
 				];
 			};
 
-			// Debounced live preview — reapply current theme with updated params
-			let previewTimer: ReturnType<typeof setTimeout> | null = null;
-			let persistTimer: ReturnType<typeof setTimeout> | null = null;
-
-			const schedulePreview = (): void => {
-				if (previewTimer) clearTimeout(previewTimer);
-				previewTimer = setTimeout(() => {
-					previewTimer = null;
+			// Fire-and-forget preview via setImmediate — no debounce needed (zero I/O)
+			let pendingPreview: ReturnType<typeof setImmediate> | null = null;
+			const firePreview = (): void => {
+				if (pendingPreview) clearImmediate(pendingPreview);
+				pendingPreview = setImmediate(() => {
+					pendingPreview = null;
 					if (!cmuxColors || !cmuxTheme) return;
 					const instance = buildThemeInstance(cmuxColors, `cmux-sync-${slugifyThemeName(cmuxTheme)}`, getThemeParams(), ctx);
 					ctx.ui.setTheme(instance);
-				}, 120);
+				});
 			};
 
+			// Persist debounced — disk write only after 500ms of inactivity
+			let persistTimer: ReturnType<typeof setTimeout> | null = null;
 			const schedulePersist = (): void => {
 				if (persistTimer) clearTimeout(persistTimer);
-				persistTimer = setTimeout(() => {
-					persistTimer = null;
-					persistSettings(pi);
-				}, 500);
+				persistTimer = setTimeout(() => { persistTimer = null; persistSettings(pi); }, 500);
 			};
 
-			let settingsList: SettingsList | null = null;
-			let items: SettingItem[] = [];
-			let selectedIdx = 0;
+			const numericKeys = new Set<string>([
+				"mutedWeight", "dimWeight", "borderWeight",
+				"bgShift", "selectedBgFactor", "userMsgBgFactor", "toolPendingBgFactor",
+				"toolSuccessTint", "toolErrorTint", "customMsgTint",
+				"linkContrastMin",
+			]);
+			const colorKeys = new Set<string>([
+				"errorFallback", "successFallback", "warningFallback",
+				"linkFallback", "accentFallback", "accentAltFallback",
+			]);
 
-			/** Cycle the currently selected item's value by the given direction (+1 or -1). */
+			const handleValueChange = (id: string, newValue: string): void => {
+				if (id === "autoSync") {
+					updateSettings(pi, { autoSync: newValue === "on" });
+					return;
+				}
+				if (numericKeys.has(id)) {
+					updateThemeParamInMemory(id as keyof ThemeParams, parseFloat(newValue));
+					firePreview();
+					schedulePersist();
+					return;
+				}
+				if (colorKeys.has(id)) {
+					const hex = newValue.startsWith("#") ? newValue : `#${newValue}`;
+					if (/^#[0-9a-fA-F]{6}$/.test(hex)) {
+						updateThemeParamInMemory(id as keyof ThemeParams, hex);
+						firePreview();
+						schedulePersist();
+					}
+				}
+			};
+
+			// Track selected index for left/right cycling
+			let selectedIdx = 0;
+			let items: SettingItem[] = [];
+			let settingsList: SettingsList | null = null;
+
 			const cycleSelected = (direction: number): void => {
 				const item = items[selectedIdx];
 				if (!item?.values || item.values.length === 0) return;
@@ -206,50 +222,12 @@ export default function (pi: ExtensionAPI) {
 				const newValue = item.values[nextIdx]!;
 				item.currentValue = newValue;
 				settingsList?.updateValue(item.id, newValue);
-				// Persist + preview
 				handleValueChange(item.id, newValue);
 			};
 
-			/** Shared handler for value changes from both cycling and SettingsList onChange. */
-			const handleValueChange = (id: string, newValue: string): void => {
-				if (id === "autoSync") {
-					updateSettings(pi, { autoSync: newValue === "on" });
-					return;
-				}
-				const numericKeys: (keyof ThemeParams)[] = [
-					"mutedWeight", "dimWeight", "borderWeight",
-					"bgShift", "selectedBgFactor", "userMsgBgFactor", "toolPendingBgFactor",
-					"toolSuccessTint", "toolErrorTint", "customMsgTint",
-					"linkContrastMin",
-				];
-				if (numericKeys.includes(id as keyof ThemeParams)) {
-					updateThemeParamInMemory(id as keyof ThemeParams, parseFloat(newValue));
-					schedulePreview();
-					schedulePersist();
-					return;
-				}
-				const colorKeys: (keyof ThemeParams)[] = [
-					"errorFallback", "successFallback", "warningFallback",
-					"linkFallback", "accentFallback", "accentAltFallback",
-				];
-				if (colorKeys.includes(id as keyof ThemeParams)) {
-					const hex = newValue.startsWith("#") ? newValue : `#${newValue}`;
-					if (/^#[0-9a-fA-F]{6}$/.test(hex)) {
-						updateThemeParamInMemory(id as keyof ThemeParams, hex);
-						schedulePreview();
-						schedulePersist();
-					}
-				}
-			};
-
+			// Normal settings panel — no special invalidation
 			await ctx.ui.custom((tui, theme, _kb, done) => {
 				const container = new Container();
-
-				// Title and footer as mutable refs so invalidate can refresh them
-				let titleText = new Text(theme.fg("accent", theme.bold(" Theme Generation Settings")), 1, 0);
-				let footerText = new Text(theme.fg("dim", " \u2190\u2192 adjust \u00B7 enter/space cycle \u00B7 / search \u00B7 esc close"), 1, 0);
-
-				// Build items once — SettingsList mutates currentValue in-place via onChange
 				items = buildItems();
 
 				settingsList = new SettingsList(
@@ -261,67 +239,20 @@ export default function (pi: ExtensionAPI) {
 						tui.requestRender();
 					},
 					() => {
-						if (previewTimer) clearTimeout(previewTimer);
+						if (pendingPreview) clearImmediate(pendingPreview);
 						if (persistTimer) { clearTimeout(persistTimer); persistSettings(pi); }
 						done(undefined);
 					},
 				);
 
-				container.addChild(titleText);
+				container.addChild(new Text(theme.fg("accent", theme.bold(" Theme Generation Settings")), 1, 0));
 				container.addChild(settingsList);
-				container.addChild(footerText);
-
-				let searchEnabled = false;
-				let searchList: SettingsList | null = null;
+				container.addChild(new Text(theme.fg("dim", " \u2190\u2192 adjust \u00B7 enter/space cycle \u00B7 esc close"), 1, 0));
 
 				return {
 					render: (w) => container.render(w),
-					invalidate: () => {
-						// Refresh chrome Text nodes with the live theme — no SettingsList recreation
-						const t = ctx.ui.theme;
-						titleText = new Text(t.fg("accent", t.bold(" Theme Generation Settings")), 1, 0);
-						footerText = new Text(t.fg("dim", " \u2190\u2192 adjust \u00B7 enter/space cycle \u00B7 / search \u00B7 esc close"), 1, 0);
-						container.clear();
-						container.addChild(titleText);
-						container.addChild(searchEnabled && searchList ? searchList : settingsList!);
-						container.addChild(footerText);
-						container.invalidate();
-						settingsList?.invalidate();
-					},
+					invalidate: () => container.invalidate(),
 					handleInput: (data) => {
-						// Toggle search mode with '/'
-						if (data === "/" && !searchEnabled) {
-							searchEnabled = true;
-							searchList = new SettingsList(
-								items,
-								12,
-								getSettingsListTheme(),
-								(id, newValue) => {
-									handleValueChange(id, newValue);
-									tui.requestRender();
-								},
-								() => {
-									searchEnabled = false;
-									searchList = null;
-									tui.requestRender();
-								},
-								{ enableSearch: true },
-							);
-							container.clear();
-							container.addChild(new Text(theme.fg("accent", theme.bold(" Theme Generation Settings")), 1, 0));
-							container.addChild(searchList);
-							container.addChild(new Text(theme.fg("dim", " esc to close search"), 1, 0));
-							tui.requestRender();
-							return;
-						}
-
-						if (searchEnabled && searchList) {
-							searchList.handleInput?.(data);
-							tui.requestRender();
-							return;
-						}
-
-						// Track selection for left/right
 						if (matchesKey(data, Key.up)) {
 							selectedIdx = selectedIdx === 0 ? items.length - 1 : selectedIdx - 1;
 						} else if (matchesKey(data, Key.down)) {
@@ -335,7 +266,6 @@ export default function (pi: ExtensionAPI) {
 							tui.requestRender();
 							return;
 						}
-
 						settingsList?.handleInput?.(data);
 						tui.requestRender();
 					},

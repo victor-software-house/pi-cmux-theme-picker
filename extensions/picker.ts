@@ -1,28 +1,20 @@
 /**
- * TUI inline picker — live cmux theme picker with debounced preview.
+ * TUI inline picker — live cmux theme picker.
  *
- * Design:
- * - Renders inline at the bottom (no overlay) for a cleaner look.
- * - True debounce (DEBOUNCE_MS): resets timer on every keypress. setTheme and
- *   cmux only fire once the user pauses — no updates while scrolling fast.
- * - Background prewrite (setImmediate): JSON file is written in the next I/O
- *   tick. By the time the debounce settles the file is already on disk.
- * - Apply is pure I/O-free: setTheme and cmux execute back-to-back with no
- *   file write in between — minimum gap between pi and cmux transitions.
+ * Architecture:
+ * - UI is a normal SelectList. Handles input, renders immediately.
+ * - Preview is a fire-and-forget side effect via setImmediate.
+ *   buildThemeInstance is pure in-memory (~1ms, zero disk I/O).
+ *   setImmediate batches rapid input to the next tick — no debounce needed.
+ * - Disk write happens only on confirm (writeAndSetPiTheme).
  */
 
 import { DynamicBorder } from "@mariozechner/pi-coding-agent";
 import { Container, Key, SelectList, Text, type SelectItem, matchesKey } from "@mariozechner/pi-tui";
 import { getCurrentCmuxThemeName, getAvailableCmuxThemes, runCmuxThemeSet } from "./cmux.js";
-import {
-	removePreviewThemeFiles,
-	writeAndSetPiTheme,
-	buildThemeInstance,
-} from "./pi-theme.js";
+import { writeAndSetPiTheme, buildThemeInstance } from "./pi-theme.js";
 import { getThemeParams } from "./settings.js";
 import type { CmuxThemeEntry, FilterMode, CommandContext } from "./types.js";
-
-const DEBOUNCE_MS = 80;
 
 function isPrintableInput(data: string): boolean {
 	return data.length === 1 && data >= " " && data !== "\x7f";
@@ -50,59 +42,38 @@ export async function showThemePicker(ctx: CommandContext): Promise<string | nul
 	let selectedTheme = originalCmuxTheme && entryByName.has(originalCmuxTheme)
 		? originalCmuxTheme
 		: entries[0]!.name;
-
-	// --- Debounce + prewrite state ---
-	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-	let pendingThemeName: string | null = null;
-	let lastPreviewName: string | null = null;
 	let closed = false;
 
-	const clearDebounce = (): void => {
-		if (debounceTimer) {
-			clearTimeout(debounceTimer);
-			debounceTimer = null;
-		}
-		pendingThemeName = null;
+	// --- Fire-and-forget preview via setImmediate ---
+	let pendingPreview: ReturnType<typeof setImmediate> | null = null;
+	let lastAppliedTheme: string | null = null;
+
+	const firePreview = (themeName: string): void => {
+		if (pendingPreview) clearImmediate(pendingPreview);
+		pendingPreview = setImmediate(() => {
+			pendingPreview = null;
+			if (closed || themeName === lastAppliedTheme) return;
+			const entry = entryByName.get(themeName);
+			if (!entry) return;
+			lastAppliedTheme = themeName;
+			const instance = buildThemeInstance(entry.colors, `cmux-preview-${themeName}`, getThemeParams(), ctx);
+			ctx.ui.setTheme(instance);
+			setTimeout(() => runCmuxThemeSet(themeName), 30);
+		});
 	};
 
-	// No prewrite needed — Theme is built in memory, zero disk I/O.
-	const applyPreview = (themeName: string): void => {
-		if (closed || themeName === lastPreviewName) return;
-		const entry = entryByName.get(themeName);
-		if (!entry) return;
-		lastPreviewName = themeName;
-		const previewName = `cmux-preview-${themeName}`;
-		const instance = buildThemeInstance(entry.colors, previewName, getThemeParams(), ctx);
-		ctx.ui.setTheme(instance);
-		setTimeout(() => runCmuxThemeSet(themeName), 30);
+	const cancelPreview = (): void => {
+		if (pendingPreview) { clearImmediate(pendingPreview); pendingPreview = null; }
 	};
 
-	const schedulePreview = (themeName: string): void => {
-		if (closed) return;
-		pendingThemeName = themeName;
-		if (debounceTimer) clearTimeout(debounceTimer);
-		debounceTimer = setTimeout(() => {
-			debounceTimer = null;
-			const name = pendingThemeName;
-			pendingThemeName = null;
-			if (name) applyPreview(name);
-		}, DEBOUNCE_MS);
-	};
-
-	// --- Close handlers ---
+	// --- Confirm / cancel ---
 	const closeWithConfirm = (themeName: string, done: (value: string | null) => void): void => {
 		if (closed) return;
 		closed = true;
-		clearDebounce();
-		removePreviewThemeFiles();
-
+		cancelPreview();
 		const entry = entryByName.get(themeName);
-		if (!entry) {
-			ctx.ui.notify(`Theme not found: ${themeName}`, "error");
-			done(null);
-			return;
-		}
-
+		if (!entry) { ctx.ui.notify(`Theme not found: ${themeName}`, "error"); done(null); return; }
+		// Single disk write — only place a file is ever written
 		writeAndSetPiTheme(ctx, entry.colors, themeName, getThemeParams());
 		runCmuxThemeSet(themeName);
 		done(themeName);
@@ -111,15 +82,13 @@ export async function showThemePicker(ctx: CommandContext): Promise<string | nul
 	const closeWithCancel = (done: (value: string | null) => void): void => {
 		if (closed) return;
 		closed = true;
-		clearDebounce();
-		removePreviewThemeFiles();
-
+		cancelPreview();
 		if (originalPiTheme) ctx.ui.setTheme(originalPiTheme);
 		if (originalCmuxTheme) runCmuxThemeSet(originalCmuxTheme);
 		done(null);
 	};
 
-	// --- Inline component (no overlay) ---
+	// --- Normal inline component ---
 	const selected = await ctx.ui.custom<string | null>((tui, _factoryTheme, _keybindings, done) => {
 		const t = () => ctx.ui.theme;
 		const container = new Container();
@@ -179,7 +148,7 @@ export async function showThemePicker(ctx: CommandContext): Promise<string | nul
 
 			selectList.onSelectionChange = (item) => {
 				selectedTheme = item.value;
-				schedulePreview(item.value);
+				firePreview(item.value);
 			};
 			selectList.onSelect = (item) => closeWithConfirm(item.value, done);
 			selectList.onCancel = () => closeWithCancel(done);
@@ -192,14 +161,12 @@ export async function showThemePicker(ctx: CommandContext): Promise<string | nul
 		};
 
 		rebuild();
-		if (selectedTheme) schedulePreview(selectedTheme);
+		if (selectedTheme) firePreview(selectedTheme);
 
 		return {
 			render: (width: number) => container.render(width),
-			// Do NOT call rebuild() here. SelectList callbacks use t() = ctx.ui.theme
-			// (live), so a plain container.invalidate() is enough to repaint with the
-			// new theme. rebuild() replaces the SelectList instance, resetting its
-			// selectedIndex and causing the visual jump / freeze during navigation.
+			// Theme change: just invalidate — SelectList callbacks use t() (live).
+			// rebuild() is only for filter/search changes triggered from handleInput.
 			invalidate: () => container.invalidate(),
 			handleInput: (data: string) => {
 				if (matchesKey(data, Key.tab)) {
