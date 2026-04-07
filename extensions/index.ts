@@ -293,12 +293,10 @@ export default function (pi: ExtensionAPI) {
 
 			// Track selected index for left/right cycling
 			let selectedIdx = 0;
-			let items: SettingItem[] = [];
 
 			await ctx.ui.custom((tui, _theme, _kb, done) => {
 				const t = () => ctx.ui.theme;
 				const container = new Container();
-				let settingsList: SettingsList;
 
 				const onClose = (): void => {
 					applyPreview.cancel();
@@ -309,29 +307,38 @@ export default function (pi: ExtensionAPI) {
 					done(undefined);
 				};
 
-				const headerText = new Text("", 1, 0);
+				// Build initial items and keep references — mutated in place on every refresh.
+				const items = buildItems();
+				const headerText = new Text(t().fg("accent", t().bold(` Theme Generation Settings [${scopeLabel()}]`)), 1, 0);
 
-				// Full rebuild — recreates SettingsList so swatch labels always reflect current values.
-				const rebuild = (): void => {
-					items = buildItems();
-					if (selectedIdx >= items.length) selectedIdx = Math.max(0, items.length - 1);
+				const settingsList = new SettingsList(
+					items,
+					12,
+					{
+						label: (text, selected) => selected ? t().fg("accent", text) : text,
+						value: (text, selected) => selected ? t().fg("accent", text) : t().fg("muted", text),
+						description: (text) => t().fg("dim", text),
+						cursor: t().fg("accent", "\u2192 "),
+						hint: (text) => t().fg("dim", text),
+					},
+					(id, newValue) => { handleValueChange(id, newValue); tui.requestRender(); },
+					onClose,
+				);
+
+				container.addChild(headerText);
+				container.addChild(settingsList);
+
+				// Mutate existing item objects so SettingsList picks up fresh labels/swatches on next render.
+				const refreshItems = (): void => {
+					const fresh = buildItems();
+					for (let i = 0; i < items.length; i++) {
+						const src = fresh[i];
+						if (!src) continue;
+						items[i].label = src.label;
+						items[i].description = src.description;
+						items[i].currentValue = src.currentValue;
+					}
 					headerText.setText(t().fg("accent", t().bold(` Theme Generation Settings [${scopeLabel()}]`)));
-					settingsList = new SettingsList(
-						items,
-						12,
-						{
-							label: (text, selected) => selected ? t().fg("accent", text) : text,
-							value: (text, selected) => selected ? t().fg("accent", text) : t().fg("muted", text),
-							description: (text) => t().fg("dim", text),
-							cursor: t().fg("accent", "\u2192 "),
-							hint: (text) => t().fg("dim", text),
-						},
-						(id, newValue) => { handleValueChange(id, newValue); tui.requestRender(); },
-						onClose,
-					);
-					container.clear();
-					container.addChild(headerText);
-					container.addChild(settingsList);
 				};
 
 				const cycleSelected = (direction: number): void => {
@@ -340,12 +347,9 @@ export default function (pi: ExtensionAPI) {
 					const curIdx = item.values.indexOf(item.currentValue);
 					const nextIdx = (curIdx + direction + item.values.length) % item.values.length;
 					const newValue = item.values[nextIdx]!;
-					item.currentValue = newValue;
 					handleValueChange(item.id, newValue);
-					rebuild();
+					refreshItems();
 				};
-
-				rebuild();
 
 				return {
 					render: (w) => container.render(w),
@@ -372,7 +376,7 @@ export default function (pi: ExtensionAPI) {
 								scope = "global";
 								setOverrideEnabled(currentThemeSlug, false);
 							}
-							rebuild();
+							refreshItems();
 							applyPreview();
 							schedulePersist();
 							tui.requestRender();
@@ -384,7 +388,7 @@ export default function (pi: ExtensionAPI) {
 							if (Object.hasOwn(DEFAULT_THEME_PARAMS, item.id)) {
 								clearOverrideParam(scope, item.id as keyof ThemeParams);
 								persistSettings();
-								rebuild();
+								refreshItems();
 								applyPreview();
 								tui.requestRender();
 							}
@@ -396,7 +400,7 @@ export default function (pi: ExtensionAPI) {
 								resetThemeParams(scope);
 								scope = "global";
 							}
-							rebuild();
+							refreshItems();
 							applyPreview();
 							tui.requestRender();
 							return;
