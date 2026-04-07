@@ -164,16 +164,31 @@ async function captureRunner(pi: ExtensionAPI): Promise<void> {
 	} catch { /* ToolExecutionComponent not available */ }
 }
 
-function createToolPreview(name: string, args: Record<string, unknown>, result: { content: { type: string; text: string }[]; details?: unknown; isError: boolean }): Component | null {
+function createToolPreviewSync(name: string, args: Record<string, unknown>): Component | null {
 	if (!_tecClass || !_runner) return null;
 	const def = _runner.getToolDefinition(name);
 	if (!def) return null;
 	const mockUi = { requestRender: () => {} };
-	const comp = new _tecClass(name, `preview-${name}`, args, { showImages: false }, def, mockUi, process.cwd());
+	const comp = new _tecClass(name, `preview-${name}-${Date.now()}`, args, { showImages: false }, def, mockUi, process.cwd());
 	comp.setArgsComplete();
-	comp.markExecutionStarted();
-	comp.updateResult(result);
-	return comp as Component;
+	return comp;
+}
+
+/** Execute a real tool call and feed the result into a ToolExecutionComponent. */
+async function executeToolPreview(
+	comp: any, name: string, args: Record<string, unknown>, ctx: any,
+): Promise<void> {
+	if (!_runner) return;
+	const def = _runner.getToolDefinition(name);
+	if (!def?.execute) return;
+	try {
+		comp.markExecutionStarted();
+		const ac = new AbortController();
+		const result = await def.execute(`preview-${name}`, args, ac.signal, () => {}, ctx);
+		comp.updateResult({ ...result, isError: false });
+	} catch (e: any) {
+		comp.updateResult({ content: [{ type: "text", text: e.message }], isError: true });
+	}
 }
 
 /**
@@ -184,6 +199,7 @@ function createToolPreview(name: string, args: Record<string, unknown>, result: 
  */
 class ThemePreview implements Component {
 	private container = new Container();
+	_pendingExecutions: { comp: any; name: string; args: Record<string, unknown> }[] = [];
 
 	// biome-ignore lint: Theme proxy has typed keys but we use string-based lookups
 	rebuild(t: () => any): void {
@@ -208,31 +224,19 @@ class ThemePreview implements Component {
 			1, 0, getMarkdownTheme(),
 		));
 
-		// --- Tool calls using Pi's actual ToolExecutionComponent ---
-		const sampleCode = "export function login(user: string) {\n  validateToken(user.token);\n}";
-		const readTool = createToolPreview("read", { path: "src/login.ts" }, {
-			content: [{ type: "text", text: sampleCode }],
-			details: { _type: "readFile", filePath: "src/login.ts", content: sampleCode, offset: 1, lineCount: 3 },
-			isError: false,
-		});
-		if (readTool) this.container.addChild(readTool);
+		// --- Tool calls using Pi's actual ToolExecutionComponent + real execution ---
+		const readArgs = { path: "extensions/colors.ts", limit: 5 };
+		const readComp = createToolPreviewSync("read", readArgs);
+		if (readComp) this.container.addChild(readComp);
 
-		const editTool = createToolPreview("edit", {
-			path: "src/login.ts",
-			edits: [{ oldText: "// missing", newText: "validateToken(user.token);" }],
-		}, {
-			content: [{ type: "text", text: "1 edit applied" }],
-			details: { diff: "--- src/login.ts\n+++ src/login.ts\n@@ -1,3 +1,3 @@\n export function login(user) {\n-  // missing\n+  validateToken(user.token);\n }" },
-			isError: false,
-		});
-		if (editTool) this.container.addChild(editTool);
+		const bashArgs = { command: "echo 'theme preview test'" };
+		const bashComp = createToolPreviewSync("bash", bashArgs);
+		if (bashComp) this.container.addChild(bashComp);
 
-		const bashTool = createToolPreview("bash", { command: "npm test" }, {
-			content: [{ type: "text", text: "Error: test suite failed\n  at login.test.ts:15" }],
-			details: { rawText: "Error: test suite failed\n  at login.test.ts:15", exitCode: 1 },
-			isError: true,
-		});
-		if (bashTool) this.container.addChild(bashTool);
+		// Execute tools async — components update in place when results arrive.
+		this._pendingExecutions = [];
+		if (readComp) this._pendingExecutions.push({ comp: readComp, name: "read", args: readArgs });
+		if (bashComp) this._pendingExecutions.push({ comp: bashComp, name: "bash", args: bashArgs });
 
 		// --- Markdown summary ---
 		this.container.addChild(new Spacer(1));
@@ -503,7 +507,14 @@ export default function (pi: ExtensionAPI) {
 
 				// Theme preview overlay — non-capturing, anchored right.
 				const preview = new ThemePreview();
-				const updatePreview = (): void => { preview.rebuild(t); };
+				const updatePreview = (): void => {
+					preview.rebuild(t);
+					// Fire async tool executions — results update components in place.
+					for (const { comp, name, args } of preview._pendingExecutions) {
+						executeToolPreview(comp, name, args, ctx).then(() => tui.requestRender());
+					}
+					preview._pendingExecutions = [];
+				};
 				updatePreview();
 				const previewHandle = (tui as any).showOverlay(preview, {
 					nonCapturing: true,
