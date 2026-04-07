@@ -6,7 +6,7 @@
  * Registers /theme-settings command for toggling extension settings.
  */
 
-import { getSettingsListTheme, type ExtensionAPI, type ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { type ExtensionAPI, type ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { Container, Key, type AutocompleteItem, type SettingItem, SettingsList, Text, matchesKey } from "@mariozechner/pi-tui";
 import { getCurrentCmuxThemeName, getCmuxThemeColors, getAvailableCmuxThemes, runCmuxThemeSet } from "./cmux.js";
 import { ensureSemanticHue, hexToRgb, mixColors } from "./colors.js";
@@ -199,32 +199,39 @@ export default function (pi: ExtensionAPI) {
 					if (!cmuxColors) return swatch(fallback);
 					return swatch(resolvePaletteSourceColor(cmuxColors, p[source]) || fallback);
 				};
+				const globalParams = getThemeParams();
+				const isOverridden = <K extends keyof ThemeParams>(key: K): boolean =>
+					scope !== "global" && p[key] !== globalParams[key];
+				const overridePrefix = <K extends keyof ThemeParams>(key: K): string =>
+					isOverridden(key) ? "* " : "";
+				const overrideDesc = <K extends keyof ThemeParams>(key: K, base: string): string =>
+					isOverridden(key) ? `${base} (global: ${globalParams[key]})` : base;
 
 				return [
 					{ id: "autoSync", label: "Auto-sync on session start", currentValue: settings.autoSync ? "on" : "off", values: ["on", "off"] },
-					{ id: "mutedWeight", label: `${bg && fg ? swatch(mixColors(fg, bg, p.mutedWeight)) : ""} Muted text weight`, currentValue: p.mutedWeight.toFixed(2), values: weight01, description: "fg/bg mix for muted text (higher = more fg)" },
-					{ id: "dimWeight", label: `${bg && fg ? swatch(mixColors(fg, bg, p.dimWeight)) : ""} Dim text weight`, currentValue: p.dimWeight.toFixed(2), values: weight01, description: "fg/bg mix for dim text" },
-					{ id: "borderWeight", label: `${bg && fg ? swatch(mixColors(fg, bg, p.borderWeight)) : ""} Border weight`, currentValue: p.borderWeight.toFixed(2), values: weight01, description: "fg/bg mix for muted borders" },
-					{ id: "bgShift", label: "Background shift", currentValue: p.bgShift.toFixed(0), values: bgShiftRange, description: "Brightness offset for derived backgrounds (higher = more contrast)" },
-					{ id: "selectedBgFactor", label: "Selected bg factor", currentValue: p.selectedBgFactor.toFixed(1), values: factorRange, description: "Multiplier of bgShift for selected item bg" },
-					{ id: "userMsgBgFactor", label: "User message bg factor", currentValue: p.userMsgBgFactor.toFixed(1), values: factorRange, description: "Multiplier of bgShift for user message bg" },
-					{ id: "toolPendingBgFactor", label: "Tool pending bg factor", currentValue: p.toolPendingBgFactor.toFixed(1), values: factorRange, description: "Multiplier of bgShift for tool pending bg" },
-					{ id: "toolSuccessTint", label: `${bg ? swatch(mixColors(bg, success, p.toolSuccessTint)) : ""} Tool success tint`, currentValue: p.toolSuccessTint.toFixed(2), values: tintRange, description: "bg/success blend (higher = more bg, subtler tint)" },
-					{ id: "toolErrorTint", label: `${bg ? swatch(mixColors(bg, error, p.toolErrorTint)) : ""} Tool error tint`, currentValue: p.toolErrorTint.toFixed(2), values: tintRange, description: "bg/error blend" },
-					{ id: "customMsgTint", label: `${bg ? swatch(mixColors(bg, accent, p.customMsgTint)) : ""} Custom msg tint`, currentValue: p.customMsgTint.toFixed(2), values: tintRange, description: "bg/accent blend for custom messages" },
-					{ id: "errorSource", label: `${sourceSwatch("errorSource", p.errorFallback)} Error source`, currentValue: p.errorSource, values: sourceValues, description: "Source color for error semantic role" },
-					{ id: "successSource", label: `${sourceSwatch("successSource", p.successFallback)} Success source`, currentValue: p.successSource, values: sourceValues, description: "Source color for success semantic role" },
-					{ id: "warningSource", label: `${sourceSwatch("warningSource", p.warningFallback)} Warning source`, currentValue: p.warningSource, values: sourceValues, description: "Source color for warning semantic role" },
-					{ id: "linkSource", label: `${sourceSwatch("linkSource", p.linkFallback)} Link source`, currentValue: p.linkSource, values: sourceValues, description: "Source color for link semantic role" },
-					{ id: "accentSource", label: `${sourceSwatch("accentSource", p.accentFallback)} Accent source`, currentValue: p.accentSource, values: sourceValues, description: "Source color for accent semantic role" },
-					{ id: "accentAltSource", label: `${sourceSwatch("accentAltSource", p.accentAltFallback)} Accent alt source`, currentValue: p.accentAltSource, values: sourceValues, description: "Source color for alternate accent role" },
-					{ id: "errorFallback", label: `${swatch(p.errorFallback)} Error fallback`, currentValue: p.errorFallback, description: "Fallback when chosen source hue is too far from red" },
-					{ id: "successFallback", label: `${swatch(p.successFallback)} Success fallback`, currentValue: p.successFallback, description: "Fallback when chosen source hue is too far from green" },
-					{ id: "warningFallback", label: `${swatch(p.warningFallback)} Warning fallback`, currentValue: p.warningFallback, description: "Fallback when chosen source hue is too far from yellow" },
-					{ id: "linkFallback", label: `${swatch(p.linkFallback)} Link fallback`, currentValue: p.linkFallback, description: "Fallback when chosen source hue is too far from blue" },
-					{ id: "accentFallback", label: `${swatch(p.accentFallback)} Accent fallback`, currentValue: p.accentFallback, description: "Used when selected accent source is missing" },
-					{ id: "accentAltFallback", label: `${swatch(p.accentAltFallback)} Accent alt fallback`, currentValue: p.accentAltFallback, description: "Used when selected accent alt source is missing" },
-					{ id: "linkContrastMin", label: "Link contrast minimum", currentValue: p.linkContrastMin.toFixed(1), values: contrastRange, description: "Minimum contrast ratio for readable links (WCAG AA = 4.5)" },
+					{ id: "mutedWeight", label: `${overridePrefix("mutedWeight")}${bg && fg ? `${swatch(mixColors(fg, bg, p.mutedWeight))} ` : ""}Muted text weight`, currentValue: p.mutedWeight.toFixed(2), values: weight01, description: overrideDesc("mutedWeight", "fg/bg mix for muted text (higher = more fg)") },
+					{ id: "dimWeight", label: `${overridePrefix("dimWeight")}${bg && fg ? `${swatch(mixColors(fg, bg, p.dimWeight))} ` : ""}Dim text weight`, currentValue: p.dimWeight.toFixed(2), values: weight01, description: overrideDesc("dimWeight", "fg/bg mix for dim text") },
+					{ id: "borderWeight", label: `${overridePrefix("borderWeight")}${bg && fg ? `${swatch(mixColors(fg, bg, p.borderWeight))} ` : ""}Border weight`, currentValue: p.borderWeight.toFixed(2), values: weight01, description: overrideDesc("borderWeight", "fg/bg mix for muted borders") },
+					{ id: "bgShift", label: `${overridePrefix("bgShift")}Background shift`, currentValue: p.bgShift.toFixed(0), values: bgShiftRange, description: overrideDesc("bgShift", "Brightness offset for derived backgrounds (higher = more contrast)") },
+					{ id: "selectedBgFactor", label: `${overridePrefix("selectedBgFactor")}Selected bg factor`, currentValue: p.selectedBgFactor.toFixed(1), values: factorRange, description: overrideDesc("selectedBgFactor", "Multiplier of bgShift for selected item bg") },
+					{ id: "userMsgBgFactor", label: `${overridePrefix("userMsgBgFactor")}User message bg factor`, currentValue: p.userMsgBgFactor.toFixed(1), values: factorRange, description: overrideDesc("userMsgBgFactor", "Multiplier of bgShift for user message bg") },
+					{ id: "toolPendingBgFactor", label: `${overridePrefix("toolPendingBgFactor")}Tool pending bg factor`, currentValue: p.toolPendingBgFactor.toFixed(1), values: factorRange, description: overrideDesc("toolPendingBgFactor", "Multiplier of bgShift for tool pending bg") },
+					{ id: "toolSuccessTint", label: `${overridePrefix("toolSuccessTint")}${bg ? `${swatch(mixColors(bg, success, p.toolSuccessTint))} ` : ""}Tool success tint`, currentValue: p.toolSuccessTint.toFixed(2), values: tintRange, description: overrideDesc("toolSuccessTint", "bg/success blend (higher = more bg, subtler tint)") },
+					{ id: "toolErrorTint", label: `${overridePrefix("toolErrorTint")}${bg ? `${swatch(mixColors(bg, error, p.toolErrorTint))} ` : ""}Tool error tint`, currentValue: p.toolErrorTint.toFixed(2), values: tintRange, description: overrideDesc("toolErrorTint", "bg/error blend") },
+					{ id: "customMsgTint", label: `${overridePrefix("customMsgTint")}${bg ? `${swatch(mixColors(bg, accent, p.customMsgTint))} ` : ""}Custom msg tint`, currentValue: p.customMsgTint.toFixed(2), values: tintRange, description: overrideDesc("customMsgTint", "bg/accent blend for custom messages") },
+					{ id: "errorSource", label: `${overridePrefix("errorSource")}${sourceSwatch("errorSource", p.errorFallback)} Error source`, currentValue: p.errorSource, values: sourceValues, description: overrideDesc("errorSource", "Source color for error semantic role") },
+					{ id: "successSource", label: `${overridePrefix("successSource")}${sourceSwatch("successSource", p.successFallback)} Success source`, currentValue: p.successSource, values: sourceValues, description: overrideDesc("successSource", "Source color for success semantic role") },
+					{ id: "warningSource", label: `${overridePrefix("warningSource")}${sourceSwatch("warningSource", p.warningFallback)} Warning source`, currentValue: p.warningSource, values: sourceValues, description: overrideDesc("warningSource", "Source color for warning semantic role") },
+					{ id: "linkSource", label: `${overridePrefix("linkSource")}${sourceSwatch("linkSource", p.linkFallback)} Link source`, currentValue: p.linkSource, values: sourceValues, description: overrideDesc("linkSource", "Source color for link semantic role") },
+					{ id: "accentSource", label: `${overridePrefix("accentSource")}${sourceSwatch("accentSource", p.accentFallback)} Accent source`, currentValue: p.accentSource, values: sourceValues, description: overrideDesc("accentSource", "Source color for accent semantic role") },
+					{ id: "accentAltSource", label: `${overridePrefix("accentAltSource")}${sourceSwatch("accentAltSource", p.accentAltFallback)} Accent alt source`, currentValue: p.accentAltSource, values: sourceValues, description: overrideDesc("accentAltSource", "Source color for alternate accent role") },
+					{ id: "errorFallback", label: `${overridePrefix("errorFallback")}${swatch(p.errorFallback)} Error fallback`, currentValue: p.errorFallback, description: overrideDesc("errorFallback", "Fallback when chosen source hue is too far from red") },
+					{ id: "successFallback", label: `${overridePrefix("successFallback")}${swatch(p.successFallback)} Success fallback`, currentValue: p.successFallback, description: overrideDesc("successFallback", "Fallback when chosen source hue is too far from green") },
+					{ id: "warningFallback", label: `${overridePrefix("warningFallback")}${swatch(p.warningFallback)} Warning fallback`, currentValue: p.warningFallback, description: overrideDesc("warningFallback", "Fallback when chosen source hue is too far from yellow") },
+					{ id: "linkFallback", label: `${overridePrefix("linkFallback")}${swatch(p.linkFallback)} Link fallback`, currentValue: p.linkFallback, description: overrideDesc("linkFallback", "Fallback when chosen source hue is too far from blue") },
+					{ id: "accentFallback", label: `${overridePrefix("accentFallback")}${swatch(p.accentFallback)} Accent fallback`, currentValue: p.accentFallback, description: overrideDesc("accentFallback", "Used when selected accent source is missing") },
+					{ id: "accentAltFallback", label: `${overridePrefix("accentAltFallback")}${swatch(p.accentAltFallback)} Accent alt fallback`, currentValue: p.accentAltFallback, description: overrideDesc("accentAltFallback", "Used when selected accent alt source is missing") },
+					{ id: "linkContrastMin", label: `${overridePrefix("linkContrastMin")}Link contrast minimum`, currentValue: p.linkContrastMin.toFixed(1), values: contrastRange, description: overrideDesc("linkContrastMin", "Minimum contrast ratio for readable links (WCAG AA = 4.5)") },
 					{ id: "previewDebounceMs", label: "Preview debounce (ms)", currentValue: settings.previewDebounceMs.toFixed(0), values: numRange(50, 1000, 50, 0), description: "Cooldown before theme preview applies (lower = faster, higher = smoother navigation)" },
 				];
 			};
