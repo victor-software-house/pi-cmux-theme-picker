@@ -312,6 +312,7 @@ class ThemePreview implements Component {
 	private pages: PreviewPage[] = [];
 	private pageIdx = 0;
 	private pageContainer = new Container();
+	private maxHeight = 0;
 	_pendingExecutions: { comp: any; name: string; args: Record<string, unknown> }[] = [];
 
 	// biome-ignore lint: Theme proxy has typed keys but we use string-based lookups
@@ -321,7 +322,15 @@ class ThemePreview implements Component {
 			(s: string) => theme.fg("borderMuted", s),
 			(s: string) => theme.fg("accent", s),
 		);
-		if (this.pages.length === 0) this.pages = getPreviewPages();
+		if (this.pages.length === 0) {
+			this.pages = getPreviewPages();
+			// Compute fixed height from all pages so the overlay doesn't jump.
+			for (const p of this.pages) {
+				const { container } = p.build(theme);
+				const h = container.render(60).length;
+				if (h > this.maxHeight) this.maxHeight = h;
+			}
+		}
 		const page = this.pages[this.pageIdx];
 		if (!page) return;
 		const { container, executions } = page.build(theme);
@@ -342,13 +351,17 @@ class ThemePreview implements Component {
 		const inner = Math.max(1, width - 2);
 		const content = this.pageContainer.render(inner);
 
+		// Fixed height: pad to maxHeight so overlay doesn't jump between pages.
+		const padded = [...content];
+		while (padded.length < this.maxHeight) padded.push("");
+
 		const b = (s: string) => this.borderFn?.(s) ?? s;
 		const label = this.getPageLabel();
 		const title = this.titleFn?.(` ${label} `) ?? ` ${label} `;
 		const titleW = title.replace(/\x1b\[[^m]*m/g, "").length;
 		const topFill = Math.max(0, inner - titleW);
 		const top = b("\u256D") + title + b("\u2500".repeat(topFill)) + b("\u256E");
-		const hint = this.hintFn?.(" [ ] pages \u00B7 p hide") ?? " [ ] pages \u00B7 p hide";
+		const hint = this.hintFn?.(" n next \u00B7 N prev \u00B7 p hide ") ?? " n next \u00B7 N prev \u00B7 p hide ";
 		const hintW = hint.replace(/\x1b\[[^m]*m/g, "").length;
 		const botFill = Math.max(0, inner - hintW);
 		const bot = b("\u2570") + hint + b("\u2500".repeat(botFill)) + b("\u256F");
@@ -357,7 +370,7 @@ class ThemePreview implements Component {
 			const pad = Math.max(0, inner - vis);
 			return b("\u2502") + line + " ".repeat(pad) + b("\u2502");
 		};
-		return [top, ...content.map(wrap), bot];
+		return [top, ...padded.map(wrap), bot];
 	}
 
 	private borderFn?: (s: string) => string;
@@ -582,7 +595,7 @@ export default function (pi: ExtensionAPI) {
 
 				container.addChild(headerText);
 				container.addChild(settingsList);
-				container.addChild(new Text(t().fg("dim", " \u2190\u2192 adjust \u00B7 tab scope \u00B7 d clear \u00B7 r reset \u00B7 p preview \u00B7 [ ] pages"), 1, 0));
+				container.addChild(new Text(t().fg("dim", " \u2190\u2192 adjust \u00B7 tab scope \u00B7 d clear \u00B7 r reset \u00B7 p preview \u00B7 n/N page"), 1, 0));
 
 				// Theme preview overlay — non-capturing, anchored right.
 				const preview = new ThemePreview();
@@ -671,9 +684,9 @@ export default function (pi: ExtensionAPI) {
 								tui.requestRender();
 							}
 							return;
-						} else if (data === "[" || data === "]") {
+						} else if (data === "n" || data === "N") {
 							if (!previewHandle.isHidden()) {
-								if (data === "]") preview.nextPage(); else preview.prevPage();
+								if (data === "n") preview.nextPage(); else preview.prevPage();
 								updatePreview();
 								tui.requestRender();
 							}
