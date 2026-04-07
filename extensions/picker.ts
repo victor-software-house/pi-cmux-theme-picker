@@ -44,13 +44,16 @@ export async function showThemePicker(ctx: CommandContext): Promise<string | nul
 		: entries[0]!.name;
 	let closed = false;
 
-	// --- Fire-and-forget preview via setImmediate ---
-	let pendingPreview: ReturnType<typeof setImmediate> | null = null;
+	// --- Fire-and-forget preview ---
+	// Pi TUI renders at 16ms intervals (MIN_RENDER_INTERVAL_MS).
+	// Schedule preview AFTER the next render completes so intermediate
+	// cursor positions are visible before the theme changes.
+	let pendingPreview: ReturnType<typeof setTimeout> | null = null;
 	let lastAppliedTheme: string | null = null;
 
 	const firePreview = (themeName: string): void => {
-		if (pendingPreview) clearImmediate(pendingPreview);
-		pendingPreview = setImmediate(() => {
+		if (pendingPreview) clearTimeout(pendingPreview);
+		pendingPreview = setTimeout(() => {
 			pendingPreview = null;
 			if (closed || themeName === lastAppliedTheme) return;
 			const entry = entryByName.get(themeName);
@@ -58,12 +61,12 @@ export async function showThemePicker(ctx: CommandContext): Promise<string | nul
 			lastAppliedTheme = themeName;
 			const instance = buildThemeInstance(entry.colors, `cmux-preview-${themeName}`, getThemeParams(), ctx);
 			ctx.ui.setTheme(instance);
-			setTimeout(() => runCmuxThemeSet(themeName), 30);
-		});
+			runCmuxThemeSet(themeName);
+		}, 20);
 	};
 
 	const cancelPreview = (): void => {
-		if (pendingPreview) { clearImmediate(pendingPreview); pendingPreview = null; }
+		if (pendingPreview) { clearTimeout(pendingPreview); pendingPreview = null; }
 	};
 
 	// --- Confirm / cancel ---

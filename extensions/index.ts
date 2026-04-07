@@ -158,16 +158,17 @@ export default function (pi: ExtensionAPI) {
 				];
 			};
 
-			// Fire-and-forget preview via setImmediate — no debounce needed (zero I/O)
-			let pendingPreview: ReturnType<typeof setImmediate> | null = null;
+			// Fire-and-forget preview — 20ms delay lets the TUI render the
+			// current frame before the theme change triggers invalidation.
+			let pendingPreview: ReturnType<typeof setTimeout> | null = null;
 			const firePreview = (): void => {
-				if (pendingPreview) clearImmediate(pendingPreview);
-				pendingPreview = setImmediate(() => {
+				if (pendingPreview) clearTimeout(pendingPreview);
+				pendingPreview = setTimeout(() => {
 					pendingPreview = null;
 					if (!cmuxColors || !cmuxTheme) return;
 					const instance = buildThemeInstance(cmuxColors, `cmux-sync-${slugifyThemeName(cmuxTheme)}`, getThemeParams(), ctx);
 					ctx.ui.setTheme(instance);
-				});
+				}, 20);
 			};
 
 			// Persist debounced — disk write only after 500ms of inactivity
@@ -239,7 +240,7 @@ export default function (pi: ExtensionAPI) {
 						tui.requestRender();
 					},
 					() => {
-						if (pendingPreview) clearImmediate(pendingPreview);
+						if (pendingPreview) clearTimeout(pendingPreview);
 						if (persistTimer) { clearTimeout(persistTimer); persistSettings(pi); }
 						done(undefined);
 					},
