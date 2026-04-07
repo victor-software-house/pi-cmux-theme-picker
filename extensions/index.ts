@@ -291,9 +291,6 @@ export default function (pi: ExtensionAPI) {
 				}
 			};
 
-			// Track selected index for left/right cycling
-			let selectedIdx = 0;
-
 			await ctx.ui.custom((tui, _theme, _kb, done) => {
 				const t = () => ctx.ui.theme;
 				const container = new Container();
@@ -321,13 +318,20 @@ export default function (pi: ExtensionAPI) {
 						cursor: t().fg("accent", "\u2192 "),
 						hint: (text) => t().fg("dim", text),
 					},
-					(id, newValue) => { handleValueChange(id, newValue); tui.requestRender(); },
+					(id, newValue) => {
+						handleValueChange(id, newValue);
+						refreshItems();
+						tui.requestRender();
+					},
 					onClose,
 				);
 
 				container.addChild(headerText);
 				container.addChild(settingsList);
 				container.addChild(new Text(t().fg("dim", " \u2190\u2192 adjust \u00B7 tab scope \u00B7 d clear override \u00B7 r reset"), 1, 0));
+
+				// Read SettingsList internal selected index (private but accessible at runtime).
+				const getSelectedIdx = (): number => (settingsList as any).selectedIndex ?? 0;
 
 				// Mutate existing item objects so SettingsList picks up fresh labels/swatches on next render.
 				const refreshItems = (): void => {
@@ -343,7 +347,8 @@ export default function (pi: ExtensionAPI) {
 				};
 
 				const cycleSelected = (direction: number): void => {
-					const item = items[selectedIdx];
+					const idx = getSelectedIdx();
+					const item = items[idx];
 					if (!item?.values || item.values.length === 0) return;
 					const curIdx = item.values.indexOf(item.currentValue);
 					const nextIdx = (curIdx + direction + item.values.length) % item.values.length;
@@ -356,11 +361,7 @@ export default function (pi: ExtensionAPI) {
 					render: (w) => container.render(w),
 					invalidate: () => container.invalidate(),
 					handleInput: (data) => {
-						if (matchesKey(data, Key.up)) {
-							selectedIdx = selectedIdx === 0 ? items.length - 1 : selectedIdx - 1;
-						} else if (matchesKey(data, Key.down)) {
-							selectedIdx = selectedIdx === items.length - 1 ? 0 : selectedIdx + 1;
-						} else if (matchesKey(data, Key.right)) {
+						if (matchesKey(data, Key.right)) {
 							cycleSelected(+1);
 							tui.requestRender();
 							return;
@@ -384,7 +385,7 @@ export default function (pi: ExtensionAPI) {
 							return;
 						} else if (data.toLowerCase() === "d") {
 							if (scope === "global") return;
-							const item = items[selectedIdx];
+							const item = items[getSelectedIdx()];
 							if (!item) return;
 							if (Object.hasOwn(DEFAULT_THEME_PARAMS, item.id)) {
 								clearOverrideParam(scope, item.id as keyof ThemeParams);
@@ -406,6 +407,7 @@ export default function (pi: ExtensionAPI) {
 							tui.requestRender();
 							return;
 						}
+						// Delegate everything else (up/down/enter/esc) to SettingsList.
 						settingsList.handleInput?.(data);
 						tui.requestRender();
 					},
