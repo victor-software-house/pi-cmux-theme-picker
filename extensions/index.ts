@@ -294,61 +294,60 @@ export default function (pi: ExtensionAPI) {
 			// Track selected index for left/right cycling
 			let selectedIdx = 0;
 			let items: SettingItem[] = [];
-			let settingsList: SettingsList | null = null;
-
-			const refreshItems = (): void => {
-				items = buildItems();
-				if (selectedIdx >= items.length) selectedIdx = Math.max(0, items.length - 1);
-				for (const item of items) settingsList?.updateValue(item.id, item.currentValue);
-			};
-
-			const cycleSelected = (direction: number): void => {
-				const item = items[selectedIdx];
-				if (!item?.values || item.values.length === 0) return;
-				const curIdx = item.values.indexOf(item.currentValue);
-				const nextIdx = (curIdx + direction + item.values.length) % item.values.length;
-				const newValue = item.values[nextIdx]!;
-				item.currentValue = newValue;
-				settingsList?.updateValue(item.id, newValue);
-				handleValueChange(item.id, newValue);
-			};
 
 			await ctx.ui.custom((tui, _theme, _kb, done) => {
 				const t = () => ctx.ui.theme;
 				const container = new Container();
-				refreshItems();
+				let settingsList: SettingsList;
 
-				// Use live theme callbacks — same pattern as the picker
-				settingsList = new SettingsList(
-					items,
-					12,
-					{
-						label: (text, selected) => selected ? t().fg("accent", text) : text,
-						value: (text, selected) => selected ? t().fg("accent", text) : t().fg("muted", text),
-						description: (text) => t().fg("dim", text),
-						cursor: t().fg("accent", "\u2192 "),
-						hint: (text) => t().fg("dim", text),
-					},
-					(id, newValue) => {
-						handleValueChange(id, newValue);
-						tui.requestRender();
-					},
-					() => {
-						applyPreview.cancel();
-						schedulePersist.flush();
-						// Write final theme with clean name — same as /theme confirm
-						if (cmuxColors && cmuxTheme) {
-							writeAndSetPiTheme(ctx, cmuxColors, cmuxTheme, getThemeParams(currentThemeSlug ?? undefined));
-						}
-						done(undefined);
-					},
-				);
+				const onClose = (): void => {
+					applyPreview.cancel();
+					schedulePersist.flush();
+					if (cmuxColors && cmuxTheme) {
+						writeAndSetPiTheme(ctx, cmuxColors, cmuxTheme, getThemeParams(currentThemeSlug ?? undefined));
+					}
+					done(undefined);
+				};
 
-				const headerText = new Text(t().fg("accent", t().bold(` Theme Generation Settings [${scopeLabel()}]`)), 1, 0);
+				const headerText = new Text("", 1, 0);
 				const hintText = new Text(t().fg("dim", " \u2190\u2192 adjust \u00B7 enter/space cycle \u00B7 tab scope \u00B7 d clear override \u00B7 r reset \u00B7 esc close"), 1, 0);
-				container.addChild(headerText);
-				container.addChild(settingsList);
-				container.addChild(hintText);
+
+				// Full rebuild — recreates SettingsList so swatch labels always reflect current values.
+				const rebuild = (): void => {
+					items = buildItems();
+					if (selectedIdx >= items.length) selectedIdx = Math.max(0, items.length - 1);
+					headerText.setText(t().fg("accent", t().bold(` Theme Generation Settings [${scopeLabel()}]`)));
+					settingsList = new SettingsList(
+						items,
+						12,
+						{
+							label: (text, selected) => selected ? t().fg("accent", text) : text,
+							value: (text, selected) => selected ? t().fg("accent", text) : t().fg("muted", text),
+							description: (text) => t().fg("dim", text),
+							cursor: t().fg("accent", "\u2192 "),
+							hint: (text) => t().fg("dim", text),
+						},
+						(id, newValue) => { handleValueChange(id, newValue); tui.requestRender(); },
+						onClose,
+					);
+					container.clear();
+					container.addChild(headerText);
+					container.addChild(settingsList);
+					container.addChild(hintText);
+				};
+
+				const cycleSelected = (direction: number): void => {
+					const item = items[selectedIdx];
+					if (!item?.values || item.values.length === 0) return;
+					const curIdx = item.values.indexOf(item.currentValue);
+					const nextIdx = (curIdx + direction + item.values.length) % item.values.length;
+					const newValue = item.values[nextIdx]!;
+					item.currentValue = newValue;
+					handleValueChange(item.id, newValue);
+					rebuild();
+				};
+
+				rebuild();
 
 				return {
 					render: (w) => container.render(w),
@@ -375,8 +374,7 @@ export default function (pi: ExtensionAPI) {
 								scope = "global";
 								setOverrideEnabled(currentThemeSlug, false);
 							}
-							headerText.setText(t().fg("accent", t().bold(` Theme Generation Settings [${scopeLabel()}]`)));
-							refreshItems();
+							rebuild();
 							applyPreview();
 							schedulePersist();
 							tui.requestRender();
@@ -388,7 +386,7 @@ export default function (pi: ExtensionAPI) {
 							if (Object.hasOwn(DEFAULT_THEME_PARAMS, item.id)) {
 								clearOverrideParam(scope, item.id as keyof ThemeParams);
 								persistSettings();
-								refreshItems();
+								rebuild();
 								applyPreview();
 								tui.requestRender();
 							}
@@ -399,14 +397,13 @@ export default function (pi: ExtensionAPI) {
 							} else {
 								resetThemeParams(scope);
 								scope = "global";
-								headerText.setText(t().fg("accent", t().bold(` Theme Generation Settings [${scopeLabel()}]`)));
 							}
-							refreshItems();
+							rebuild();
 							applyPreview();
 							tui.requestRender();
 							return;
 						}
-						settingsList?.handleInput?.(data);
+						settingsList.handleInput?.(data);
 						tui.requestRender();
 					},
 				};
