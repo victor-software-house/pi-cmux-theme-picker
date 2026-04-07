@@ -159,10 +159,14 @@ export default function (pi: ExtensionAPI) {
 				];
 			};
 
-			// Decoupled preview: debounced, reads latest in-memory params
+			// Decoupled preview: debounced, reads latest in-memory params.
+			// Counter ensures theme.name changes on every preview so renderer
+			// extensions that cache by name invalidate properly.
+			let previewSeq = 0;
 			const applyPreview = debounce(() => {
 				if (!cmuxColors || !cmuxTheme) return;
-				const instance = buildThemeInstance(cmuxColors, `cmux-sync-${slugifyThemeName(cmuxTheme)}`, getThemeParams(), ctx);
+				const slug = slugifyThemeName(cmuxTheme);
+				const instance = buildThemeInstance(cmuxColors, `cmux-preview-${slug}-${++previewSeq}`, getThemeParams(), ctx);
 				ctx.ui.setTheme(instance);
 			}, 50, { leading: true, trailing: true, maxWait: 100 });
 
