@@ -220,6 +220,50 @@ export function writeAndPreviewPiTheme(ctx: SessionContext, colors: CmuxColors, 
 	ctx.ui.setTheme(themeName);
 }
 
+/** Background color keys — same set as Pi's internal createTheme. */
+const BG_COLOR_KEYS = new Set([
+	"selectedBg",
+	"userMessageBg",
+	"customMessageBg",
+	"toolPendingBg",
+	"toolSuccessBg",
+	"toolErrorBg",
+]);
+
+/**
+ * Build a Theme instance entirely in memory from CmuxColors + ThemeParams.
+ * No file I/O — passes directly to ctx.ui.setTheme(instance).
+ *
+ * Uses ctx.ui.theme.constructor (not an import) to get the exact Theme class
+ * identity that Pi's internal setTheme instanceof check requires.
+ */
+export function buildThemeInstance(
+	colors: CmuxColors,
+	themeName: string,
+	p: ThemeParams,
+	ctx: SessionContext,
+): InstanceType<typeof import("@mariozechner/pi-coding-agent").Theme> {
+	const json = generatePiTheme(colors, themeName, p) as {
+		vars: Record<string, string>;
+		colors: Record<string, string>;
+	};
+
+	// Replicate Pi's resolveThemeColors: map color role → hex via vars
+	const fgColors: Record<string, string> = {};
+	const bgColors: Record<string, string> = {};
+	for (const [key, val] of Object.entries(json.colors)) {
+		const hex = val === "" || val.startsWith("#") ? val : (json.vars[val] ?? val);
+		if (BG_COLOR_KEYS.has(key)) bgColors[key] = hex;
+		else fgColors[key] = hex;
+	}
+
+	// Must use the constructor from the live theme instance — NOT a static import.
+	// Pi's setTheme does `instanceof Theme` against its own module-internal class.
+	// A separate require/import gets a different module instance and instanceof fails.
+	const ThemeClass = (ctx.ui.theme as any).constructor;
+	return new ThemeClass(fgColors, bgColors, "truecolor", { name: themeName });
+}
+
 /** Resolve the preview theme name for a given source theme. */
 export function previewNameFor(themeName: string): string {
 	return `${PREVIEW_THEME_PREFIX}${slugifyThemeName(themeName)}`;

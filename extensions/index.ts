@@ -14,7 +14,7 @@ import {
 	slugifyThemeName,
 	removePreviewThemeFiles,
 	writeAndSetPiTheme,
-	writeAndPreviewPiTheme,
+	buildThemeInstance,
 } from "./pi-theme.js";
 import { showThemePicker } from "./picker.js";
 import { getSettings, updateSettings, updateThemeParamInMemory, persistSettings, getThemeParams, restoreSettings } from "./settings.js";
@@ -180,7 +180,8 @@ export default function (pi: ExtensionAPI) {
 				previewTimer = setTimeout(() => {
 					previewTimer = null;
 					if (!cmuxColors || !cmuxTheme) return;
-					writeAndPreviewPiTheme(ctx, cmuxColors, cmuxTheme, getThemeParams());
+					const instance = buildThemeInstance(cmuxColors, `cmux-sync-${slugifyThemeName(cmuxTheme)}`, getThemeParams(), ctx);
+					ctx.ui.setTheme(instance);
 				}, 120);
 			};
 

@@ -15,11 +15,9 @@ import { DynamicBorder } from "@mariozechner/pi-coding-agent";
 import { Container, Key, SelectList, Text, type SelectItem, matchesKey } from "@mariozechner/pi-tui";
 import { getCurrentCmuxThemeName, getAvailableCmuxThemes, runCmuxThemeSet } from "./cmux.js";
 import {
-	ensureThemesDir,
 	removePreviewThemeFiles,
 	writeAndSetPiTheme,
-	writePreviewFile,
-	previewNameFor,
+	buildThemeInstance,
 } from "./pi-theme.js";
 import { getThemeParams } from "./settings.js";
 import type { CmuxThemeEntry, FilterMode, CommandContext } from "./types.js";
@@ -58,7 +56,6 @@ export async function showThemePicker(ctx: CommandContext): Promise<string | nul
 	let pendingThemeName: string | null = null;
 	let lastPreviewName: string | null = null;
 	let closed = false;
-	const prewritten = new Set<string>();
 
 	const clearDebounce = (): void => {
 		if (debounceTimer) {
@@ -68,43 +65,21 @@ export async function showThemePicker(ctx: CommandContext): Promise<string | nul
 		pendingThemeName = null;
 	};
 
-	const prewriteTheme = (themeName: string): void => {
-		if (closed || prewritten.has(themeName)) return;
-		const entry = entryByName.get(themeName);
-		if (!entry) return;
-		setImmediate(() => {
-			if (closed || prewritten.has(themeName)) return;
-			try {
-				ensureThemesDir();
-				writePreviewFile(entry.colors, themeName, getThemeParams());
-				prewritten.add(themeName);
-			} catch {
-				// Best-effort — applyPreview will fallback to sync write
-			}
-		});
-	};
-
+	// No prewrite needed — Theme is built in memory, zero disk I/O.
 	const applyPreview = (themeName: string): void => {
 		if (closed || themeName === lastPreviewName) return;
 		const entry = entryByName.get(themeName);
 		if (!entry) return;
 		lastPreviewName = themeName;
-		if (!prewritten.has(themeName)) {
-			ensureThemesDir();
-			writePreviewFile(entry.colors, themeName, getThemeParams());
-			prewritten.add(themeName);
-		}
-		ctx.ui.setTheme(previewNameFor(themeName));
-		// Defer cmux slightly so Pi's render cycle completes first.
-		// setTheme queues a re-render for the next tick; cmux escape sequences
-		// are near-instant, so without the delay cmux wins the race visually.
+		const previewName = `cmux-preview-${themeName}`;
+		const instance = buildThemeInstance(entry.colors, previewName, getThemeParams(), ctx);
+		ctx.ui.setTheme(instance);
 		setTimeout(() => runCmuxThemeSet(themeName), 30);
 	};
 
 	const schedulePreview = (themeName: string): void => {
 		if (closed) return;
 		pendingThemeName = themeName;
-		prewriteTheme(themeName);
 		if (debounceTimer) clearTimeout(debounceTimer);
 		debounceTimer = setTimeout(() => {
 			debounceTimer = null;
