@@ -7,7 +7,7 @@ Detailed decision records and implementation notes live in [`docs/decisions/`](d
 
 - [x] **Migrate to changesets** — replaced semantic-release with `@changesets/cli`. See [DR-01](docs/decisions/DR-01-changesets-migration.md). ✔
 - [x] ~~**Force-bump rules**~~ — superseded by changesets (explicit changeset files replace commit-type rules). See [DR-02](docs/decisions/DR-02-force-bump-rules.md).
-- [ ] **Branch protection** — require PRs to `main`, no direct push. Configure via GitHub rulesets (`gh api`). Pairs with changesets model.
+- [x] **Branch protection** — require PRs to `main`, no direct push for non-admins. Configured via GitHub branch protection. ✔
 
 ## UX polish
 
