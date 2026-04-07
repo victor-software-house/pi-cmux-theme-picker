@@ -9,7 +9,7 @@ The `/theme-settings` panel has three gaps:
 
 1. **No visual feedback for color settings.** Fallback color options (`errorFallback`, `successFallback`, etc.) show hex values but no color preview. Users must mentally map `#cc4444` to a color.
 
-2. **No control over palette role mapping.** The theme generator assigns fixed palette indices to semantic roles (e.g. `palette[1]` → error, `palette[4]` → link). Some cmux/Ghostty themes have better accent colors at different indices. Users should be able to remap which palette slot feeds which semantic role.
+2. **No control over palette role mapping.** The theme generator assigns fixed palette indices to semantic roles (e.g. `palette[1]` → error, `palette[4]` → link). Some cmux themes have better accent colors at different indices. Users should be able to remap which palette slot feeds which semantic role.
 
 3. **Settings are global only.** All ThemeParams apply identically to every theme. Some themes need per-theme overrides (e.g. a light theme might need higher `bgShift` than a dark one, or a specific theme's `palette[5]` works better as the error color than `palette[1]`).
 

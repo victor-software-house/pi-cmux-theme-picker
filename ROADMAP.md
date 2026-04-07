@@ -11,10 +11,18 @@ Detailed decision records and implementation notes live in [`docs/decisions/`](d
 
 ## UX polish
 
+- [x] **Status bar params summary** — show current theme params when non-default (`17c0f2a`) ✔
+- [x] **Reset to defaults** — `r` key in `/theme-settings` resets params (`028dd63`) ✔
 - [ ] **Settings panel overhaul** — color swatches, palette role mapping, scoped settings (global vs per-theme). See [DR-03](docs/decisions/DR-03-settings-panel-ux.md).
-- [ ] Preview cleanup: ensure `cmux-preview-*` files are cleaned up on cancel and confirm
-- [ ] Status bar: show current theme params summary (e.g. "muted:0.35 dim:0.20")
-- [ ] Settings panel: add "Reset to defaults" option
+  - [x] Palette source types + resolver (`13b71d7`)
+  - [x] Theme generation uses palette mapping (`13b71d7`)
+  - [x] Color swatches in settings panel (`13b71d7`)
+  - [x] Palette role mapping settings UI (`13b71d7`)
+  - [x] Scoped settings model in `settings.ts` (`9b21c1d`)
+  - [ ] Scope toggle UI in `/theme-settings` (in progress, uncommitted)
+  - [ ] Pass theme slug to all `getThemeParams()` callers (partial, uncommitted)
+  - [ ] Per-theme visual indicators (`*` prefix, override description)
+- [ ] **Dead code cleanup** — remove `writePreviewFile()`, `removePreviewThemeFiles()`, and `PREVIEW_THEME_PREFIX` (never called — previews are entirely in-memory). Revert the no-op cleanup calls added in `46d952a`.
 
 ## Future
 
