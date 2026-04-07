@@ -130,7 +130,7 @@ function getTEC(): typeof _tec {
 	return _tec;
 }
 
-function createToolPreview(name: string, args: Record<string, unknown>, result: { content: { type: string; text: string }[]; details?: string; isError: boolean }): Component | null {
+function createToolPreview(name: string, args: Record<string, unknown>, result: { content: { type: string; text: string }[]; details?: unknown; isError: boolean }): Component | null {
 	const tec = getTEC();
 	if (!tec) return null;
 	const mockUi = { requestRender: () => {} };
@@ -185,7 +185,7 @@ class ThemePreview implements Component {
 			edits: [{ oldText: "// missing", newText: "validateToken(user.token);" }],
 		}, {
 			content: [{ type: "text", text: "1 edit applied" }],
-			details: "--- src/login.ts\n+++ src/login.ts\n@@ -1,3 +1,3 @@\n export function login(user) {\n-  // missing\n+  validateToken(user.token);\n }",
+			details: { diff: "--- src/login.ts\n+++ src/login.ts\n@@ -1,3 +1,3 @@\n export function login(user) {\n-  // missing\n+  validateToken(user.token);\n }" },
 			isError: false,
 		});
 		if (editTool) this.container.addChild(editTool);
@@ -341,7 +341,7 @@ export default function (pi: ExtensionAPI) {
 					isOverridden(key) ? `${base} (global: ${globalParams[key]})` : base;
 
 				return [
-					{ id: "autoSync", label: "Auto-sync on session start", currentValue: settings.autoSync ? "on" : "off", values: ["on", "off"] },
+					{ id: "autoSync", label: "Auto-sync on session start", currentValue: settings.autoSync ? "on" : "off", values: ["on", "off"], description: "Sync Pi theme with cmux theme when a session starts" },
 					{ id: "mutedWeight", label: `${overridePrefix("mutedWeight")}${bg && fg ? `${swatch(mixColors(fg, bg, p.mutedWeight))} ` : ""}Muted text weight`, currentValue: p.mutedWeight.toFixed(2), values: weight01, description: overrideDesc("mutedWeight", "fg/bg mix for muted text (higher = more fg)") },
 					{ id: "dimWeight", label: `${overridePrefix("dimWeight")}${bg && fg ? `${swatch(mixColors(fg, bg, p.dimWeight))} ` : ""}Dim text weight`, currentValue: p.dimWeight.toFixed(2), values: weight01, description: overrideDesc("dimWeight", "fg/bg mix for dim text") },
 					{ id: "borderWeight", label: `${overridePrefix("borderWeight")}${bg && fg ? `${swatch(mixColors(fg, bg, p.borderWeight))} ` : ""}Border weight`, currentValue: p.borderWeight.toFixed(2), values: weight01, description: overrideDesc("borderWeight", "fg/bg mix for muted borders") },
