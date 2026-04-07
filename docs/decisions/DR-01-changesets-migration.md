@@ -1,6 +1,6 @@
 # DR-01: Migrate from semantic-release to changesets
 
-**Status:** planned
+**Status:** implemented
 **Priority:** next
 
 ## Problem
@@ -24,8 +24,8 @@ Migrate to [`@changesets/cli`](https://github.com/changesets/changesets) with th
 
 ## Migration steps
 
-1. Install: `pnpm add -D @changesets/cli @changesets/changelog-github`
-2. Init: `pnpm changeset init` (creates `.changeset/` directory with config)
+1. Install: `bun add -D @changesets/cli @changesets/changelog-github`
+2. Init: `bunx changeset init` (creates `.changeset/` directory with config)
 3. Configure `.changeset/config.json`:
    ```json
    {
@@ -50,7 +50,7 @@ Migrate to [`@changesets/cli`](https://github.com/changesets/changesets) with th
 
 ```
 developer creates PR
-  → adds changeset: `pnpm changeset` (interactive prompt for bump type + description)
+  → adds changeset: `bunx changeset` (interactive prompt for bump type + description)
   → PR reviewed and merged to main
 
 changesets bot updates "Version Packages" PR
@@ -65,7 +65,7 @@ maintainer merges "Version Packages" PR when ready
 
 ## What about force bumps?
 
-Changesets handles this naturally — `pnpm changeset` prompts for the bump type. To force a patch for a docs change, just create a changeset with `patch` and describe it. No special commit type rules needed.
+Changesets handles this naturally — `bunx changeset` prompts for the bump type. To force a patch for a docs change, just create a changeset with `patch` and describe it. No special commit type rules needed.
 
 ## What about failed releases?
 

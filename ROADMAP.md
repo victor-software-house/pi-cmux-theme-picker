@@ -5,9 +5,9 @@ Detailed decision records and implementation notes live in [`docs/decisions/`](d
 
 ## Next
 
-- [ ] **Migrate to changesets** — replace semantic-release with `@changesets/cli` for batched, PR-gated releases. See [DR-01](docs/decisions/DR-01-changesets-migration.md).
-- [ ] **Force-bump rules** — `docs(readme):` and `chore(bump):` should trigger patch releases. See [DR-02](docs/decisions/DR-02-force-bump-rules.md). (Blocked by DR-01 — changesets handles this differently.)
-- [ ] **Branch protection** — require PRs to `main`, no direct push. Pairs with changesets model.
+- [x] **Migrate to changesets** — replaced semantic-release with `@changesets/cli`. See [DR-01](docs/decisions/DR-01-changesets-migration.md). ✔
+- [x] ~~**Force-bump rules**~~ — superseded by changesets (explicit changeset files replace commit-type rules). See [DR-02](docs/decisions/DR-02-force-bump-rules.md).
+- [ ] **Branch protection** — require PRs to `main`, no direct push. Configure via GitHub rulesets (`gh api`). Pairs with changesets model.
 
 ## UX polish
 
