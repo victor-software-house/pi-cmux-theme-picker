@@ -19,9 +19,9 @@ Detailed decision records and implementation notes live in [`docs/decisions/`](d
   - [x] Color swatches in settings panel (`13b71d7`)
   - [x] Palette role mapping settings UI (`13b71d7`)
   - [x] Scoped settings model in `settings.ts` (`9b21c1d`)
-  - [ ] Scope toggle UI in `/theme-settings` (in progress, uncommitted)
-  - [ ] Pass theme slug to all `getThemeParams()` callers (partial, uncommitted)
-  - [ ] Per-theme visual indicators (`*` prefix, override description)
+  - [x] Scope toggle UI in `/theme-settings` (`4d0f69c`) ✔
+  - [x] Pass theme slug to all `getThemeParams()` callers (`4d0f69c`) ✔
+  - [ ] Per-theme visual indicators (`* ` prefix implemented in dirty `index.ts`, `(overrides global)` description not yet)
 - [ ] **Dead code cleanup** — remove `writePreviewFile()`, `removePreviewThemeFiles()`, and `PREVIEW_THEME_PREFIX` (never called — previews are entirely in-memory). Revert the no-op cleanup calls added in `46d952a`.
 
 ## Future

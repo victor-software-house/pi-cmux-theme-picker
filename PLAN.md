@@ -119,28 +119,21 @@ Types (`ThemeOverride`, updated `Settings`), resolution (`getThemeParams(themeSl
 
 Scope state, `Tab` toggle between global and per-theme, header update, `d` key for clearing single override, scope-aware reset.
 
-**Status:** ⏳ In progress — implemented in dirty `extensions/index.ts` (uncommitted). Includes:
+**Status:** ✔ Done — committed in `4d0f69c`. Includes:
 - Scope state (`let scope: "global" | string`)
 - `Tab` key toggles scope, updates header text
 - `d` key clears per-theme override for selected setting
-- `r` key reset is scope-aware
+- `r` key reset is scope-aware (global resets params, per-theme clears overrides and switches back to global)
 - Header shows `[global]` or `[slug]`
 - Help footer includes `tab scope · d clear override`
-
-**Remaining:** Per-theme visual indicators (accent `*` prefix for overridden values, `(overrides global: <value>)` description) are not yet implemented in the uncommitted changes.
 
 ### 4g. Callers — pass theme slug
 
 Update all callers of `getThemeParams()` to pass the current cmux theme slug.
 
-**Status:** ⏳ Partially done in dirty `extensions/index.ts` (uncommitted). The following callsites are updated:
-- `syncCurrentCmuxThemeToPi` — ✔ passes `slug`
-- `/theme` direct apply — ✔ passes `slugifyThemeName(themeArg)`
-- Picker result handler — ✔ passes `slugifyThemeName(selected)`
-- `/theme-settings` `buildItems()` — ✔ uses `paramsForScope()`
-- `/theme-settings` preview debounce — ✔ uses `paramsForScope()`
-- `/theme-settings` close handler — ✔ passes `currentThemeSlug`
-- `picker.ts` callsites — ❌ not yet updated (still calls `getThemeParams()` without slug)
+**Status:** ✔ Done — committed in `4d0f69c`. All callsites updated:
+- `index.ts`: `syncCurrentCmuxThemeToPi`, `/theme` direct apply, picker result handler, `/theme-settings` (`buildItems`, preview debounce, close handler)
+- `picker.ts`: `originalInstance` build, `applyPreview` debounce, `closeWithConfirm`
 
 ---
 
@@ -172,10 +165,10 @@ This reversal should happen after the scope toggle UI and caller updates are com
 | 6 | Extended color swatches (#4c) | ✔ Committed (`13b71d7`) |
 | 7 | Palette role mapping settings UI (#4d) | ✔ Committed (`13b71d7`) |
 | 8 | Scoped settings types + resolution (#4e) | ✔ Committed (`9b21c1d`) |
-| 9 | Scope toggle UI (#4f) | ⏳ In progress (dirty `index.ts`) |
-| 10 | Callers — pass theme slug (#4g) | ⏳ Partial (dirty `index.ts` + `picker.ts` not started) |
-| 11 | Dead code reversal (new) | Pending — remove preview file dead code |
-| 12 | Per-theme visual indicators (#4f remainder) | Pending — `*` prefix + override description |
+| 9 | Scope toggle UI (#4f) | ✔ Committed (`4d0f69c`) |
+| 10 | Callers — pass theme slug (#4g) | ✔ Committed (`4d0f69c`) |
+| 11 | Per-theme visual indicators (#4f remainder) | ⏳ In progress (dirty `index.ts` — `* ` prefix marker implemented, description annotation not yet) |
+| 12 | Dead code reversal (new) | Pending — remove preview file dead code |
 
 ---
 
