@@ -170,6 +170,26 @@ jobs:
 
 ---
 
+### Step 6b: Add `changeset status` to `ci.yml` (changeset enforcement)
+
+Append the following step to the `validate` job in `ci.yml`, after "Verify package contents":
+
+```yaml
+      - name: Require changeset
+        if: github.event_name == 'pull_request' && !startsWith(github.head_ref, 'changeset-release/')
+        run: bunx changeset status --since=origin/main
+```
+
+This step:
+- Runs **only on PRs** (not on push to main).
+- **Skips the auto-maintained "Version Packages" PR** (branch `changeset-release/main`).
+- Fails if package files changed without a `.changeset/*.md` file.
+- PRs that intentionally skip a release use `bunx changeset --empty` to satisfy the check.
+
+**Verify:** The step is present in `ci.yml` after the pack step. The `if` condition references `changeset-release/`.
+
+---
+
 ### Step 7: Replace `.github/workflows/publish.yml` with `release.yml`
 
 Delete `publish.yml` and create `release.yml`:
@@ -275,32 +295,23 @@ Replace the `## Next` section items with:
 
 ---
 
-### Step 10: Update AGENTS.md release pipeline section
+### Step 10: Update AGENTS.md
 
-Find the `### Release pipeline` section in `AGENTS.md` and replace its content (from `### Release pipeline` up to but not including the next `###` heading) with:
+Replace the `## What matters most` section with:
 
 ```markdown
-### Release pipeline
+## What matters most
 
-- `@changesets/cli` manages versioning. PRs that affect the published package include a changeset file (`.changeset/*.md`).
-- The changesets GitHub Action (`.github/workflows/release.yml`) maintains a "Version Packages" PR that accumulates pending changesets.
-- Merging the "Version Packages" PR bumps `package.json`, updates `CHANGELOG.md`, deletes changeset files, and publishes to npm.
-- Uses OIDC trusted publishing — no `NPM_TOKEN`, no `NODE_AUTH_TOKEN` in the workflow.
-- Provenance is generated automatically in CI (`publishConfig.provenance: true`). Local `npm publish` requires `--provenance=false`.
-- PRs without changeset files do not trigger releases (docs, refactors, chores are invisible to versioning).
-- To force a release for a non-code change (e.g. README update visible on npm), add a `patch` changeset.
-
-DO NOT add `NPM_TOKEN` or `NODE_AUTH_TOKEN` to the workflow — it would break OIDC trust.
+This is a published npm package with changesets-gated releases. Merging to `main` does not publish automatically — only merging the auto-maintained "Version Packages" PR triggers an npm publish. Treat `main` as a release branch.
 ```
 
-Also find the `## Commit discipline` section. If it contains text referencing semantic-release version bumps or "Squash merge titles determine the version bump", update to:
+Replace the `## Commit discipline` section (from `## Commit discipline` up to but not including the next `##` heading) with:
 
 ```markdown
 ## Commit discipline
 
 - Small, logical commits — one change per commit.
 - Conventional Commits are mandatory (enforced by lefthook + CI commitlint).
-- Push to `main` carefully — every push runs the changesets action.
 - PRs that affect the published package must include a changeset file (`bunx changeset`).
 - The changeset file specifies the bump type (`patch`, `minor`, `major`) and a human-readable description.
 
@@ -317,7 +328,101 @@ Also find the `## Commit discipline` section. If it contains text referencing se
 **DO NOT:** use `minor` for changes to a feature that already shipped. Adding a setting to an existing command is `patch`, not `minor`.
 ```
 
-**Verify:** `grep "semantic-release" AGENTS.md` returns no matches. `grep "changesets" AGENTS.md` returns matches.
+Replace the `### Release pipeline` section (from `### Release pipeline` up to but not including the next `###` heading) with:
+
+```markdown
+### Release pipeline
+
+- `@changesets/cli` manages versioning. PRs that affect the published package include a changeset file (`.changeset/*.md`).
+- The changesets GitHub Action (`.github/workflows/release.yml`) maintains a "Version Packages" PR that accumulates pending changesets.
+- Merging the "Version Packages" PR bumps `package.json`, updates `CHANGELOG.md`, deletes changeset files, and publishes to npm.
+- Uses OIDC trusted publishing — no `NPM_TOKEN`, no `NODE_AUTH_TOKEN` in the workflow.
+- Provenance is generated automatically in CI (`publishConfig.provenance: true`). Local `npm publish` requires `--provenance=false`.
+- PRs without changeset files do not trigger releases (docs, refactors, chores are invisible to versioning).
+- To force a release for a non-code change (e.g. README update visible on npm), add a `patch` changeset.
+
+DO NOT add `NPM_TOKEN` or `NODE_AUTH_TOKEN` to the workflow — it would break OIDC trust.
+```
+
+Add a new section after `## Commit discipline` and before `## Release pipeline` (or wherever architecture constraints start):
+
+```markdown
+## Pre-push changeset gate
+
+Before every push, check whether a changeset is required. This is the bridge between conventional commits and changesets — enforced by agent discipline, not CI alone.
+
+**Decision procedure (run mentally before every push):**
+
+1. List commits being pushed: `git log --oneline origin/main..HEAD`
+2. Classify each commit type from its conventional commit prefix.
+3. Apply the release rule:
+
+| Commit types present | Changeset required? | Minimum bump |
+|:---------------------|:--------------------|:-------------|
+| Only `chore:` `docs:` `refactor:` `test:` `ci:` `style:` | No | — |
+| Any `fix:` `perf:` `revert:` | Yes | `patch` |
+| Any `feat:` | Yes | `minor` |
+| Any `feat!:` or `BREAKING CHANGE:` footer | Yes | `major` |
+
+4. If a changeset is required and none exists in `.changeset/`:
+   - Stop. Run `bunx changeset` and select the correct bump type.
+   - The changeset summary must be a short, factual description of what changed for the package consumer.
+   - Commit the changeset file before pushing.
+5. If no changeset is required but one exists, that is allowed (deliberate release of non-code changes).
+6. If the PR intentionally has releasable commits but should not trigger a release, use `bunx changeset --empty` and commit it.
+
+**Blocking message (if changeset is missing):**
+
+```
+STOP — changeset required.
+
+Commits in this push include release-implying types: <list types found>
+Minimum bump implied: <patch|minor|major>
+No .changeset/*.md file found.
+
+Action required:
+  bunx changeset        # interactive — select bump type and write summary
+  git add .changeset/
+  git commit -m "chore: add changeset for <short description>"
+
+If this push intentionally should NOT release, use:
+  bunx changeset --empty
+  git add .changeset/
+  git commit -m "chore: empty changeset — no release intended"
+```
+
+CI also enforces this via `changeset status --since=origin/main` on PRs, but the agent gate catches it earlier.
+```
+
+Update the `## Orient quickly` section to reflect the new file structure — replace lines referencing `release.config.mjs` and `publish.yml`:
+
+```
+.changeset/           — changeset config + pending changeset files
+lefthook.yml          — commit-msg: commitlint · pre-push: bun lockfile sync + typecheck
+.github/workflows/ci.yml      — PR validation: commitlint, typecheck, changeset status
+.github/workflows/release.yml — changesets action: Version Packages PR + npm publish (OIDC)
+```
+
+**Verify:**
+- `grep "semantic-release" AGENTS.md` returns no matches.
+- `grep "changesets" AGENTS.md` returns matches.
+- `grep "Pre-push changeset gate" AGENTS.md` returns a match.
+- `grep "STOP" AGENTS.md` returns the blocking message.
+
+---
+
+### Step 10b: Add empty changeset for this PR
+
+This migration PR has no releasable commits (`chore:` only), but `changeset status` in CI will check for it. To be explicit:
+
+```bash
+bunx changeset --empty
+git add .changeset/
+```
+
+This creates an empty changeset file (no packages, no bump) that satisfies the CI gate.
+
+**Verify:** A new `.changeset/*.md` file exists with empty frontmatter (`---\n---`).
 
 ---
 
