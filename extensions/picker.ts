@@ -3,9 +3,9 @@
  *
  * Architecture:
  * - UI is a normal SelectList. Handles input, renders immediately.
- * - Preview is a fire-and-forget side effect via setImmediate.
- *   buildThemeInstance is pure in-memory (~1ms, zero disk I/O).
- *   setImmediate batches rapid input to the next tick — no debounce needed.
+ * - Preview is a fire-and-forget side effect via leading+trailing throttle.
+ *   First selection fires instantly; rapid navigation coalesces and applies
+ *   the latest theme after a cooldown. UI never blocks.
  * - Disk write happens only on confirm (writeAndSetPiTheme).
  */
 
@@ -14,6 +14,7 @@ import { Container, Key, SelectList, Text, type SelectItem, matchesKey } from "@
 import { getCurrentCmuxThemeName, getAvailableCmuxThemes, runCmuxThemeSet } from "./cmux.js";
 import { writeAndSetPiTheme, buildThemeInstance } from "./pi-theme.js";
 import { getThemeParams } from "./settings.js";
+import { throttle } from "./throttle.js";
 import type { CmuxThemeEntry, FilterMode, CommandContext } from "./types.js";
 
 function isPrintableInput(data: string): boolean {
@@ -44,39 +45,23 @@ export async function showThemePicker(ctx: CommandContext): Promise<string | nul
 		: entries[0]!.name;
 	let closed = false;
 
-	// --- Fire-and-forget preview ---
-	// Pi TUI renders at 16ms intervals (MIN_RENDER_INTERVAL_MS).
-	// Schedule preview AFTER the next render completes so intermediate
-	// cursor positions are visible before the theme changes.
-	let pendingPreview: ReturnType<typeof setTimeout> | null = null;
-	let lastAppliedTheme: string | null = null;
+	// Preview: leading+trailing throttle at 50ms.
+	// First selection applies instantly. Rapid navigation coalesces.
+	const applyPreview = throttle((themeName: string) => {
+		if (closed) return;
+		const entry = entryByName.get(themeName);
+		if (!entry) return;
+		const instance = buildThemeInstance(entry.colors, `cmux-preview-${themeName}`, getThemeParams(), ctx);
+		ctx.ui.setTheme(instance);
+		runCmuxThemeSet(themeName);
+	}, 50);
 
-	const firePreview = (themeName: string): void => {
-		if (pendingPreview) clearTimeout(pendingPreview);
-		pendingPreview = setTimeout(() => {
-			pendingPreview = null;
-			if (closed || themeName === lastAppliedTheme) return;
-			const entry = entryByName.get(themeName);
-			if (!entry) return;
-			lastAppliedTheme = themeName;
-			const instance = buildThemeInstance(entry.colors, `cmux-preview-${themeName}`, getThemeParams(), ctx);
-			ctx.ui.setTheme(instance);
-			runCmuxThemeSet(themeName);
-		}, 20);
-	};
-
-	const cancelPreview = (): void => {
-		if (pendingPreview) { clearTimeout(pendingPreview); pendingPreview = null; }
-	};
-
-	// --- Confirm / cancel ---
 	const closeWithConfirm = (themeName: string, done: (value: string | null) => void): void => {
 		if (closed) return;
 		closed = true;
-		cancelPreview();
+		applyPreview.cancel();
 		const entry = entryByName.get(themeName);
 		if (!entry) { ctx.ui.notify(`Theme not found: ${themeName}`, "error"); done(null); return; }
-		// Single disk write — only place a file is ever written
 		writeAndSetPiTheme(ctx, entry.colors, themeName, getThemeParams());
 		runCmuxThemeSet(themeName);
 		done(themeName);
@@ -85,13 +70,12 @@ export async function showThemePicker(ctx: CommandContext): Promise<string | nul
 	const closeWithCancel = (done: (value: string | null) => void): void => {
 		if (closed) return;
 		closed = true;
-		cancelPreview();
+		applyPreview.cancel();
 		if (originalPiTheme) ctx.ui.setTheme(originalPiTheme);
 		if (originalCmuxTheme) runCmuxThemeSet(originalCmuxTheme);
 		done(null);
 	};
 
-	// --- Normal inline component ---
 	const selected = await ctx.ui.custom<string | null>((tui, _factoryTheme, _keybindings, done) => {
 		const t = () => ctx.ui.theme;
 		const container = new Container();
@@ -151,7 +135,7 @@ export async function showThemePicker(ctx: CommandContext): Promise<string | nul
 
 			selectList.onSelectionChange = (item) => {
 				selectedTheme = item.value;
-				firePreview(item.value);
+				applyPreview(item.value);
 			};
 			selectList.onSelect = (item) => closeWithConfirm(item.value, done);
 			selectList.onCancel = () => closeWithCancel(done);
@@ -164,12 +148,10 @@ export async function showThemePicker(ctx: CommandContext): Promise<string | nul
 		};
 
 		rebuild();
-		if (selectedTheme) firePreview(selectedTheme);
+		if (selectedTheme) applyPreview(selectedTheme);
 
 		return {
 			render: (width: number) => container.render(width),
-			// Theme change: just invalidate — SelectList callbacks use t() (live).
-			// rebuild() is only for filter/search changes triggered from handleInput.
 			invalidate: () => container.invalidate(),
 			handleInput: (data: string) => {
 				if (matchesKey(data, Key.tab)) {

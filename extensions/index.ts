@@ -18,6 +18,7 @@ import {
 } from "./pi-theme.js";
 import { showThemePicker } from "./picker.js";
 import { getSettings, updateSettings, updateThemeParamInMemory, persistSettings, getThemeParams, restoreSettings } from "./settings.js";
+import { throttle } from "./throttle.js";
 import { DEFAULT_THEME_PARAMS, type SessionContext, type ThemeParams } from "./types.js";
 
 const STATUS_KEY = "cmux-theme";
@@ -158,18 +159,13 @@ export default function (pi: ExtensionAPI) {
 				];
 			};
 
-			// Fire-and-forget preview — 20ms delay lets the TUI render the
-			// current frame before the theme change triggers invalidation.
-			let pendingPreview: ReturnType<typeof setTimeout> | null = null;
-			const firePreview = (): void => {
-				if (pendingPreview) clearTimeout(pendingPreview);
-				pendingPreview = setTimeout(() => {
-					pendingPreview = null;
-					if (!cmuxColors || !cmuxTheme) return;
-					const instance = buildThemeInstance(cmuxColors, `cmux-sync-${slugifyThemeName(cmuxTheme)}`, getThemeParams(), ctx);
-					ctx.ui.setTheme(instance);
-				}, 20);
-			};
+			// Leading+trailing throttle: first change applies instantly,
+			// rapid changes coalesce and apply the latest after 50ms cooldown.
+			const firePreview = throttle((_: void) => {
+				if (!cmuxColors || !cmuxTheme) return;
+				const instance = buildThemeInstance(cmuxColors, `cmux-sync-${slugifyThemeName(cmuxTheme)}`, getThemeParams(), ctx);
+				ctx.ui.setTheme(instance);
+			}, 50);
 
 			// Persist debounced — disk write only after 500ms of inactivity
 			let persistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -240,7 +236,7 @@ export default function (pi: ExtensionAPI) {
 						tui.requestRender();
 					},
 					() => {
-						if (pendingPreview) clearTimeout(pendingPreview);
+						firePreview.cancel();
 						if (persistTimer) { clearTimeout(persistTimer); persistSettings(pi); }
 						done(undefined);
 					},
