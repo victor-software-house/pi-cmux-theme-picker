@@ -100,9 +100,10 @@ function parseCommandThemeName(args: string): string {
 }
 
 /** Render a single truecolor block for a hex color. */
+/** Color swatch using background color — doesn't interfere with fg accent on selection. */
 function swatch(hex: string): string {
 	const { r, g, b } = hexToRgb(hex);
-	return `\x1b[38;2;${r};${g};${b}m\u2588\x1b[39m`;
+	return `\x1b[48;2;${r};${g};${b}m  \x1b[49m`;
 }
 
 /** Generate a string[] of numeric values from min to max with given step, formatted to decimals. */
@@ -116,25 +117,59 @@ function numRange(min: number, max: number, step: number, decimals: number): str
 
 // --- Theme preview overlay ---
 
-// Lazy-loaded ToolExecutionComponent — lives in Pi's internal renderer.
-let _tec: { cls: any; defs: Record<string, any> } | null = null;
-function getTEC(): typeof _tec {
-	if (!_tec) {
+// Captured internal runner — provides getToolDefinition with extension overrides.
+let _runner: { getToolDefinition: (name: string) => any } | null = null;
+let _tecClass: any = null;
+
+async function captureRunner(pi: ExtensionAPI): Promise<void> {
+	try {
+		const inspector = require("node:inspector");
+		const session = new inspector.Session();
+		session.connect();
+		const post = (method: string, params: Record<string, unknown>): Promise<any> =>
+			new Promise((resolve, reject) => session.post(method, params, (err: Error | null, res: unknown) => err ? reject(err) : resolve(res)));
+
+		const key = `__cmuxTheme_${Date.now()}`;
+		(globalThis as any)[key] = pi.getAllTools;
 		try {
-			const base = require.resolve("@mariozechner/pi-coding-agent").replace(/dist\/index\.js$/, "dist/");
-			const tecMod = require(`${base}modes/interactive/components/tool-execution.js`);
-			const toolsMod = require(`${base}core/tools/index.js`);
-			_tec = { cls: tecMod.ToolExecutionComponent, defs: toolsMod.allToolDefinitions };
-		} catch { /* graceful fallback */ }
-	}
-	return _tec;
+			const fn1 = await post("Runtime.evaluate", { expression: `globalThis.${key}` });
+			const int1 = await post("Runtime.getProperties", { objectId: fn1.result.objectId, ownProperties: false });
+			const scopesId1 = int1.internalProperties.find((p: any) => p.name === "[[Scopes]]").value.objectId;
+			const chain1 = await post("Runtime.getProperties", { objectId: scopesId1, ownProperties: true });
+			const props1 = await post("Runtime.getProperties", { objectId: chain1.result[0].value.objectId, ownProperties: true });
+			const runtimeId = props1.result.find((p: any) => p.name === "runtime").value.objectId;
+			await post("Runtime.callFunctionOn", { objectId: runtimeId, functionDeclaration: `function() { globalThis.${key} = this.getAllTools; }` });
+			const fn2 = await post("Runtime.evaluate", { expression: `globalThis.${key}` });
+			const int2 = await post("Runtime.getProperties", { objectId: fn2.result.objectId, ownProperties: false });
+			const scopesId2 = int2.internalProperties.find((p: any) => p.name === "[[Scopes]]").value.objectId;
+			const chain2 = await post("Runtime.getProperties", { objectId: scopesId2, ownProperties: true });
+			const props2 = await post("Runtime.getProperties", { objectId: chain2.result[0].value.objectId, ownProperties: true });
+			const runnerId = props2.result.find((p: any) => p.name === "runner").value.objectId;
+			await post("Runtime.callFunctionOn", { objectId: runnerId, functionDeclaration: `function() { globalThis.${key} = this; }` });
+			_runner = (globalThis as any)[key];
+		} finally {
+			delete (globalThis as any)[key];
+			session.disconnect();
+		}
+	} catch { /* runner capture failed — will fall back to built-in defs */ }
+
+	try {
+		const base = require.resolve("@mariozechner/pi-coding-agent").replace(/dist\/index\.js$/, "dist/");
+		_tecClass = require(`${base}modes/interactive/components/tool-execution.js`).ToolExecutionComponent;
+		// If runner capture failed, load built-in defs as fallback
+		if (!_runner) {
+			const defs = require(`${base}core/tools/index.js`).allToolDefinitions;
+			_runner = { getToolDefinition: (name: string) => defs[name] };
+		}
+	} catch { /* ToolExecutionComponent not available */ }
 }
 
 function createToolPreview(name: string, args: Record<string, unknown>, result: { content: { type: string; text: string }[]; details?: unknown; isError: boolean }): Component | null {
-	const tec = getTEC();
-	if (!tec) return null;
+	if (!_tecClass || !_runner) return null;
+	const def = _runner.getToolDefinition(name);
+	if (!def) return null;
 	const mockUi = { requestRender: () => {} };
-	const comp = new tec.cls(name, `preview-${name}`, args, { showImages: false }, tec.defs[name], mockUi, process.cwd());
+	const comp = new _tecClass(name, `preview-${name}`, args, { showImages: false }, def, mockUi, process.cwd());
 	comp.setArgsComplete();
 	comp.markExecutionStarted();
 	comp.updateResult(result);
@@ -254,6 +289,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		loadSettings(ctx.cwd);
 		cachedThemeNames = getAvailableCmuxThemes().map((e) => e.name);
+		await captureRunner(pi);
 
 		if (getSettings().autoSync) {
 			syncCurrentCmuxThemeToPi(ctx);
@@ -469,7 +505,7 @@ export default function (pi: ExtensionAPI) {
 				const previewHandle = (tui as any).showOverlay(preview, {
 					nonCapturing: true,
 					anchor: "right-center",
-					width: "40%",
+					width: "45%",
 					minWidth: 38,
 					margin: { right: 1, top: 1, bottom: 1 },
 				}) as OverlayHandle;
