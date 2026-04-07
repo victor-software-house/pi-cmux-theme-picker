@@ -21,6 +21,7 @@ import {
 	writePreviewFile,
 	previewNameFor,
 } from "./pi-theme.js";
+import { getThemeParams } from "./settings.js";
 import type { CmuxThemeEntry, FilterMode, CommandContext } from "./types.js";
 
 const DEBOUNCE_MS = 80;
@@ -75,7 +76,7 @@ export async function showThemePicker(ctx: CommandContext): Promise<string | nul
 			if (closed || prewritten.has(themeName)) return;
 			try {
 				ensureThemesDir();
-				writePreviewFile(entry.colors, themeName);
+				writePreviewFile(entry.colors, themeName, getThemeParams());
 				prewritten.add(themeName);
 			} catch {
 				// Best-effort — applyPreview will fallback to sync write
@@ -90,7 +91,7 @@ export async function showThemePicker(ctx: CommandContext): Promise<string | nul
 		lastPreviewName = themeName;
 		if (!prewritten.has(themeName)) {
 			ensureThemesDir();
-			writePreviewFile(entry.colors, themeName);
+			writePreviewFile(entry.colors, themeName, getThemeParams());
 			prewritten.add(themeName);
 		}
 		ctx.ui.setTheme(previewNameFor(themeName));
@@ -124,7 +125,7 @@ export async function showThemePicker(ctx: CommandContext): Promise<string | nul
 			return;
 		}
 
-		writeAndSetPiTheme(ctx, entry.colors, themeName);
+		writeAndSetPiTheme(ctx, entry.colors, themeName, getThemeParams());
 		runCmuxThemeSet(themeName);
 		done(themeName);
 	};
