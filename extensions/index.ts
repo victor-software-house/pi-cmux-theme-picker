@@ -211,10 +211,12 @@ function getPreviewPages(): PreviewPage[] {
 			title: "Messages",
 			build: (theme) => {
 				const c = new Container();
+				c.addChild(new Spacer(1));
 				c.addChild(new Markdown("Fix the auth bug in login.ts", 1, 1, getMarkdownTheme(), {
 					bgColor: (text: string) => theme.bg("userMessageBg", text),
 					color: (text: string) => theme.fg("userMessageText", text),
 				}));
+				c.addChild(new Spacer(1));
 				c.addChild(new Markdown(
 					"I'll fix the **authentication** bug.\n" +
 					"Let me [read the file](src/auth.ts) first.",
