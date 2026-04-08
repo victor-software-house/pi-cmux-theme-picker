@@ -1,6 +1,6 @@
 {
   "name": "pi-cmux-theme-picker",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Live cmux terminal theme picker for Pi with synchronized pi + cmux theme switching and debounced preview.",
   "license": "MIT",
   "author": "Victor Software House",
