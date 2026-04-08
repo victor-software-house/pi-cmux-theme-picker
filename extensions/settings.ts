@@ -13,19 +13,30 @@ import { DEFAULT_THEME_PARAMS, type ThemeParams } from "./types.js";
 
 const CONFIG_FILENAME = "pi-cmux-theme-picker.json";
 
+export interface ThemeOverride {
+	enabled: boolean;
+	params: Partial<ThemeParams>;
+}
+
 export interface Settings {
 	autoSync: boolean;
 	themeParams: ThemeParams;
 	previewDebounceMs: number;
+	themeOverrides: Record<string, ThemeOverride>;
 }
 
 const DEFAULTS: Settings = {
 	autoSync: false,
 	themeParams: { ...DEFAULT_THEME_PARAMS },
 	previewDebounceMs: 200,
+	themeOverrides: {},
 };
 
-let current: Settings = { ...DEFAULTS, themeParams: { ...DEFAULTS.themeParams } };
+let current: Settings = {
+	...DEFAULTS,
+	themeParams: { ...DEFAULTS.themeParams },
+	themeOverrides: {},
+};
 
 // --- Paths ---
 
@@ -54,14 +65,32 @@ function writeConfigFile(path: string, data: Settings): void {
 	writeFileSync(path, JSON.stringify(data, null, 2) + "\n");
 }
 
+function mergeThemeOverrides(
+	globalOverrides: Record<string, ThemeOverride> | undefined,
+	projectOverrides: Record<string, ThemeOverride> | undefined,
+): Record<string, ThemeOverride> {
+	const merged = { ...(globalOverrides ?? {}), ...(projectOverrides ?? {}) };
+	const normalized: Record<string, ThemeOverride> = {};
+	for (const [slug, override] of Object.entries(merged)) {
+		normalized[slug] = {
+			enabled: override?.enabled === true,
+			params: { ...(override?.params ?? {}) },
+		};
+	}
+	return normalized;
+}
+
 // --- Public API ---
 
 export function getSettings(): Settings {
 	return current;
 }
 
-export function getThemeParams(): ThemeParams {
-	return current.themeParams;
+export function getThemeParams(themeSlug?: string): ThemeParams {
+	if (!themeSlug) return current.themeParams;
+	const override = current.themeOverrides[themeSlug];
+	if (!override?.enabled) return current.themeParams;
+	return { ...current.themeParams, ...override.params };
 }
 
 export function getPreviewDebounceMs(): number {
@@ -77,6 +106,7 @@ export function loadSettings(cwd: string): void {
 		...DEFAULTS,
 		...merged,
 		themeParams: { ...DEFAULT_THEME_PARAMS, ...(merged.themeParams ?? {}) },
+		themeOverrides: mergeThemeOverrides(globalConfig.themeOverrides, projectConfig.themeOverrides),
 	};
 }
 
@@ -84,15 +114,59 @@ export function loadSettings(cwd: string): void {
 export function updateSettings(patch: Partial<Settings>): void {
 	if (patch.themeParams) {
 		current = { ...current, ...patch, themeParams: { ...current.themeParams, ...patch.themeParams } };
+	} else if (patch.themeOverrides) {
+		current = { ...current, ...patch, themeOverrides: { ...current.themeOverrides, ...patch.themeOverrides } };
 	} else {
 		current = { ...current, ...patch };
 	}
 	writeConfigFile(globalConfigPath(), current);
 }
 
+function ensureOverride(scope: string): ThemeOverride {
+	if (!current.themeOverrides[scope]) {
+		current.themeOverrides[scope] = { enabled: true, params: {} };
+	}
+	return current.themeOverrides[scope]!;
+}
+
 /** Update a single theme param in memory only — call persistSettings() when done. */
-export function updateThemeParamInMemory<K extends keyof ThemeParams>(key: K, value: ThemeParams[K]): void {
-	current.themeParams[key] = value;
+export function updateThemeParamInMemory<K extends keyof ThemeParams>(
+	key: K,
+	value: ThemeParams[K],
+	scope: "global" | string = "global",
+): void {
+	if (scope === "global") {
+		current.themeParams[key] = value;
+		return;
+	}
+	const override = ensureOverride(scope);
+	override.enabled = true;
+	override.params[key] = value;
+}
+
+export function setOverrideEnabled(themeSlug: string, enabled: boolean): void {
+	const override = ensureOverride(themeSlug);
+	override.enabled = enabled;
+}
+
+export function clearOverrideParam(themeSlug: string, key: keyof ThemeParams): void {
+	const override = current.themeOverrides[themeSlug];
+	if (!override) return;
+	delete override.params[key];
+}
+
+export function clearAllOverrides(themeSlug: string): void {
+	delete current.themeOverrides[themeSlug];
+}
+
+/** Reset theme params to defaults (global or scoped override) and persist to global config. */
+export function resetThemeParams(scope: "global" | string = "global"): void {
+	if (scope === "global") {
+		current.themeParams = { ...DEFAULT_THEME_PARAMS };
+	} else {
+		clearAllOverrides(scope);
+	}
+	writeConfigFile(globalConfigPath(), current);
 }
 
 /** Persist current in-memory settings to global config. */

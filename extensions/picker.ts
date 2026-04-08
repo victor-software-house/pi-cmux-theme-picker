@@ -14,7 +14,7 @@ import { DynamicBorder } from "@mariozechner/pi-coding-agent";
 import { Container, Key, SelectList, Text, type SelectItem, matchesKey } from "@mariozechner/pi-tui";
 import { debounce } from "perfect-debounce";
 import { getCurrentCmuxThemeName, getAvailableCmuxThemes, runCmuxThemeSet } from "./cmux.js";
-import { writeAndSetPiTheme, buildThemeInstance } from "./pi-theme.js";
+import { writeAndSetPiTheme, buildThemeInstance, slugifyThemeName } from "./pi-theme.js";
 import { getThemeParams, getPreviewDebounceMs } from "./settings.js";
 import type { CmuxThemeEntry, FilterMode, CommandContext } from "./types.js";
 
@@ -41,8 +41,8 @@ export async function showThemePicker(_pi: ExtensionAPI, ctx: CommandContext): P
 	// ctx.ui.theme is a Proxy (always reflects current) — can't capture a snapshot.
 	// Build a restore instance from the current cmux colors + params.
 	const originalCmuxColors = originalCmuxTheme ? entryByName.get(originalCmuxTheme)?.colors : null;
-	const originalInstance = originalCmuxColors
-		? buildThemeInstance(originalCmuxColors, `cmux-restore-${Date.now()}`, getThemeParams(), ctx)
+	const originalInstance = originalCmuxColors && originalCmuxTheme
+		? buildThemeInstance(originalCmuxColors, `cmux-restore-${Date.now()}`, getThemeParams(slugifyThemeName(originalCmuxTheme)), ctx)
 		: null;
 
 	let filterMode: FilterMode = "all";
@@ -60,7 +60,7 @@ export async function showThemePicker(_pi: ExtensionAPI, ctx: CommandContext): P
 		const entry = entryByName.get(selectedTheme);
 		if (!entry) return;
 		lastAppliedTheme = selectedTheme;
-		const instance = buildThemeInstance(entry.colors, `cmux-preview-${selectedTheme}-${Date.now()}`, getThemeParams(), ctx);
+		const instance = buildThemeInstance(entry.colors, `cmux-preview-${selectedTheme}-${Date.now()}`, getThemeParams(slugifyThemeName(selectedTheme)), ctx);
 		ctx.ui.setTheme(instance);
 		runCmuxThemeSet(selectedTheme);
 	}, getPreviewDebounceMs());
@@ -71,7 +71,7 @@ export async function showThemePicker(_pi: ExtensionAPI, ctx: CommandContext): P
 		applyPreview.cancel();
 		const entry = entryByName.get(themeName);
 		if (!entry) { ctx.ui.notify(`Theme not found: ${themeName}`, "error"); done(null); return; }
-		writeAndSetPiTheme(ctx, entry.colors, themeName, getThemeParams());
+		writeAndSetPiTheme(ctx, entry.colors, themeName, getThemeParams(slugifyThemeName(themeName)));
 		runCmuxThemeSet(themeName);
 		done(themeName);
 	};

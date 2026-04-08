@@ -1,8 +1,8 @@
 /**
- * Pi theme generation, file management, and preview lifecycle.
+ * Pi theme generation and file management.
  *
- * Converts cmux palette colors into a full Pi theme JSON, handles writing
- * preview and permanent theme files, and cleans up stale artifacts.
+ * Converts cmux palette colors into a full Pi theme JSON, writes permanent
+ * theme files, and builds in-memory Theme instances for live preview.
  */
 
 import { createHash } from "node:crypto";
@@ -16,11 +16,9 @@ import {
 	ensureSemanticHue,
 	pickReadableLink,
 } from "./colors.js";
-import type { CmuxColors, SessionContext, ThemeParams } from "./types.js";
+import type { CmuxColors, PaletteSource, SessionContext, ThemeParams } from "./types.js";
 
 export const PI_THEMES_DIR = join(homedir(), ".pi", "agent", "themes");
-export const PREVIEW_THEME_PREFIX = "cmux-preview-";
-
 export function slugifyThemeName(name: string): string {
 	return name
 		.trim()
@@ -35,18 +33,6 @@ export function ensureThemesDir(): void {
 	}
 }
 
-export function removePreviewThemeFiles(): void {
-	try {
-		for (const file of readdirSync(PI_THEMES_DIR)) {
-			if (file.startsWith(PREVIEW_THEME_PREFIX) && file.endsWith(".json")) {
-				unlinkSync(join(PI_THEMES_DIR, file));
-			}
-		}
-	} catch {
-		// Best-effort cleanup
-	}
-}
-
 function computeThemeHash(colors: CmuxColors): string {
 	const parts: string[] = [];
 	parts.push(`bg=${colors.background}`);
@@ -54,6 +40,16 @@ function computeThemeHash(colors: CmuxColors): string {
 	for (let i = 0; i <= 15; i++) parts.push(`p${i}=${colors.palette[i] ?? ""}`);
 	const signature = parts.join("\n");
 	return createHash("sha1").update(signature).digest("hex").slice(0, 8);
+}
+
+export function resolvePaletteSourceColor(colors: CmuxColors, source: PaletteSource): string | undefined {
+	if (source === "fg") return colors.foreground;
+	if (source === "bg") return colors.background;
+	const match = source.match(/^palette\[(\d{1,2})\]$/);
+	if (!match) return undefined;
+	const index = Number.parseInt(match[1]!, 10);
+	if (index < 0 || index > 15) return undefined;
+	return colors.palette[index];
 }
 
 function cleanupOldSyncThemes(keepFiles: string[]): void {
@@ -78,19 +74,31 @@ function cleanupOldSyncThemes(keepFiles: string[]): void {
 	}
 }
 
-export function generatePiTheme(colors: CmuxColors, themeName: string, p: ThemeParams): object {
+/** All resolved theme colors computed from cmux palette + params. */
+export interface ResolvedColors {
+	bg: string; fg: string;
+	error: string; success: string; warning: string; link: string;
+	accent: string; accentAlt: string;
+	muted: string; dim: string; borderMuted: string;
+	selectedBg: string; userMsgBg: string;
+	toolPendingBg: string; toolSuccessBg: string; toolErrorBg: string;
+	customMsgBg: string;
+}
+
+/** Compute all derived theme colors from cmux colors + params. */
+export function resolveThemeColors(colors: CmuxColors, p: ThemeParams): ResolvedColors {
 	const bg = colors.background;
 	const fg = colors.foreground;
 	const isDark = getLuminance(bg) < 0.5;
 
-	const error = ensureSemanticHue(colors.palette[1], 0, p.errorFallback);
-	const success = ensureSemanticHue(colors.palette[2], 120, p.successFallback);
-	const warning = ensureSemanticHue(colors.palette[3], 50, p.warningFallback);
-	const rawLink = ensureSemanticHue(colors.palette[4], 220, p.linkFallback);
+	const error = ensureSemanticHue(resolvePaletteSourceColor(colors, p.errorSource), 0, p.errorFallback);
+	const success = ensureSemanticHue(resolvePaletteSourceColor(colors, p.successSource), 120, p.successFallback);
+	const warning = ensureSemanticHue(resolvePaletteSourceColor(colors, p.warningSource), 50, p.warningFallback);
+	const rawLink = ensureSemanticHue(resolvePaletteSourceColor(colors, p.linkSource), 220, p.linkFallback);
 	const link = pickReadableLink(rawLink, bg, p.linkFallback, fg, p.linkContrastMin);
 
-	const accent = colors.palette[5] || p.accentFallback;
-	const accentAlt = colors.palette[6] || p.accentAltFallback;
+	const accent = resolvePaletteSourceColor(colors, p.accentSource) || p.accentFallback;
+	const accentAlt = resolvePaletteSourceColor(colors, p.accentAltSource) || p.accentAltFallback;
 
 	const muted = mixColors(fg, bg, p.mutedWeight);
 	const dim = mixColors(fg, bg, p.dimWeight);
@@ -105,12 +113,25 @@ export function generatePiTheme(colors: CmuxColors, themeName: string, p: ThemeP
 	const customMsgBg = mixColors(bg, accent, p.customMsgTint);
 
 	return {
+		bg, fg, error, success, warning, link, accent, accentAlt,
+		muted, dim, borderMuted, selectedBg, userMsgBg,
+		toolPendingBg, toolSuccessBg, toolErrorBg, customMsgBg,
+	};
+}
+
+export function generatePiTheme(colors: CmuxColors, themeName: string, p: ThemeParams): object {
+	const c = resolveThemeColors(colors, p);
+
+	return {
 		$schema: "https://raw.githubusercontent.com/badlogic/pi-mono/main/packages/coding-agent/src/modes/interactive/theme/theme-schema.json",
 		name: themeName,
 		vars: {
-			bg, fg, accent, accentAlt, link, error, success, warning,
-			muted, dim, borderMuted, selectedBg, userMsgBg,
-			toolPendingBg, toolSuccessBg, toolErrorBg, customMsgBg,
+			bg: c.bg, fg: c.fg, accent: c.accent, accentAlt: c.accentAlt,
+			link: c.link, error: c.error, success: c.success, warning: c.warning,
+			muted: c.muted, dim: c.dim, borderMuted: c.borderMuted,
+			selectedBg: c.selectedBg, userMsgBg: c.userMsgBg,
+			toolPendingBg: c.toolPendingBg, toolSuccessBg: c.toolSuccessBg,
+			toolErrorBg: c.toolErrorBg, customMsgBg: c.customMsgBg,
 		},
 		colors: {
 			accent: "accent",
@@ -166,9 +187,9 @@ export function generatePiTheme(colors: CmuxColors, themeName: string, p: ThemeP
 			bashMode: "success",
 		},
 		export: {
-			pageBg: isDark ? adjustBrightness(bg, -8) : adjustBrightness(bg, 8),
-			cardBg: bg,
-			infoBg: mixColors(bg, warning, 0.88),
+			pageBg: getLuminance(c.bg) < 0.5 ? adjustBrightness(c.bg, -8) : adjustBrightness(c.bg, 8),
+			cardBg: c.bg,
+			infoBg: mixColors(c.bg, c.warning, 0.88),
 		},
 	};
 }
@@ -198,16 +219,6 @@ export function writeAndSetPiTheme(ctx: SessionContext, colors: CmuxColors, sour
 	const instance = buildThemeInstance(colors, `${themeName}-${Date.now()}`, p, ctx);
 	ctx.ui.setTheme(instance);
 	return themeName;
-}
-
-/** Write a preview theme file (for prewrite or fallback sync write). */
-export function writePreviewFile(colors: CmuxColors, themeName: string, p: ThemeParams): string {
-	const slug = slugifyThemeName(themeName);
-	const previewName = `${PREVIEW_THEME_PREFIX}${slug}`;
-	const previewPath = join(PI_THEMES_DIR, `${previewName}.json`);
-	const json = generatePiTheme(colors, previewName, p);
-	writeFileSync(previewPath, JSON.stringify(json, null, 2));
-	return previewName;
 }
 
 /** Background color keys — same set as Pi's internal createTheme. */
@@ -254,7 +265,3 @@ export function buildThemeInstance(
 	return new ThemeClass(fgColors, bgColors, "truecolor", { name: themeName });
 }
 
-/** Resolve the preview theme name for a given source theme. */
-export function previewNameFor(themeName: string): string {
-	return `${PREVIEW_THEME_PREFIX}${slugifyThemeName(themeName)}`;
-}
